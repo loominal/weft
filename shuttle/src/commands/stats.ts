@@ -49,7 +49,10 @@ export function statsCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         if (!globalOpts.quiet) {
           spinner.start('Fetching statistics...');

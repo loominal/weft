@@ -52,7 +52,10 @@ function targetsListCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         if (!globalOpts.quiet) {
           spinner.start('Fetching targets...');
@@ -136,7 +139,10 @@ function targetsAddCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         // Build mechanism config based on type
         let mechanismConfig: Record<string, any> = {};
@@ -249,7 +255,10 @@ function targetsGetCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         if (!globalOpts.quiet) {
           spinner.start('Fetching target...');
@@ -303,7 +312,10 @@ function targetsUpdateCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         const updates: Record<string, any> = {};
         if (options.capabilities) {
@@ -371,7 +383,10 @@ function targetsRemoveCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         if (!options.yes && !globalOpts.json) {
           const confirmed = await confirm(`Remove target "${target}"?`);
@@ -424,7 +439,10 @@ function targetsTestCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         if (!globalOpts.quiet) {
           spinner.start('Testing target...');
@@ -485,7 +503,10 @@ function targetsEnableCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         if (!globalOpts.quiet) {
           spinner.start('Enabling target...');
@@ -530,7 +551,10 @@ function targetsDisableCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         if (!globalOpts.quiet) {
           spinner.start('Disabling target...');

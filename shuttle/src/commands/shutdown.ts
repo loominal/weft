@@ -26,7 +26,10 @@ export function shutdownCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         // Confirm shutdown unless --yes flag
         if (!options.yes && !globalOpts.json) {

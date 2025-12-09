@@ -23,7 +23,10 @@ export function watchCommand(): Command {
       let lastStatus = '';
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
         const pollInterval = parseInt(options.interval, 10) * 1000;
 
         if (!globalOpts.quiet) {

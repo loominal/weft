@@ -24,7 +24,10 @@ export function spinUpCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         // Must provide either --target or filters
         if (!options.target && !options.type && !options.capability && !options.boundary) {

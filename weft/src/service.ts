@@ -1,12 +1,18 @@
 /**
- * Coordinator Service
+ * Coordinator Service (Multi-Tenant)
  *
- * Main service that wires together all components:
+ * Main service that handles multiple projects in a single deployment.
+ * Projects are auto-discovered when first request arrives.
+ *
+ * Components per project:
  * - Extended Coordinator (routing, work management)
  * - Target Registry (dynamic spin-up targets)
  * - Spin-Up Manager (agent lifecycle)
  * - Idle Tracker (scale-down)
- * - REST API (control plane)
+ *
+ * Shared components:
+ * - NATS Connection
+ * - REST API (with /api/projects/:projectId routes)
  */
 
 import type { NatsConnection } from 'nats';
@@ -17,10 +23,7 @@ import type { CoordinatorConfiguration } from '@loom/shared';
 import { DEFAULT_COORDINATOR_CONFIG } from '@loom/shared';
 
 // Component imports
-import { ExtendedCoordinator, type ExtendedCoordinatorConfig } from './coordinator/index.js';
-import { TargetRegistry, HealthCheckRunner } from './targets/index.js';
-import { SpinUpManager } from './spin-up/index.js';
-import { IdleTracker } from './idle/index.js';
+import { ProjectManager, type ProjectContext } from './projects/index.js';
 import { createExpressApp, startServer, type CoordinatorServiceLayer } from './api/index.js';
 
 /**
@@ -29,11 +32,7 @@ import { createExpressApp, startServer, type CoordinatorServiceLayer } from './a
 interface ServiceState {
   config: CoordinatorConfiguration;
   nc: NatsConnection;
-  coordinator: ExtendedCoordinator;
-  targetRegistry: TargetRegistry;
-  spinUpManager: SpinUpManager;
-  idleTracker: IdleTracker;
-  healthCheckRunner: HealthCheckRunner;
+  projectManager: ProjectManager;
   httpServer?: Server;
   isRunning: boolean;
 }
@@ -51,6 +50,7 @@ function loadConfig(): CoordinatorConfiguration {
     config.nats.url = process.env.NATS_URL;
   }
 
+  // LOOM_PROJECT_ID now becomes the default project (optional)
   if (process.env.LOOM_PROJECT_ID) {
     config.projectId = process.env.LOOM_PROJECT_ID;
   }
@@ -79,16 +79,26 @@ function loadConfig(): CoordinatorConfiguration {
 }
 
 /**
- * Create a service layer that bridges API routes to internal components
+ * Extract project ID from NATS subject
+ * Subject format: coord.<projectId>.<resource>.<action>
  */
-function createServiceLayer(
-  coordinator: ExtendedCoordinator,
-  targetRegistry: TargetRegistry,
-  spinUpManager: SpinUpManager,
-  _idleTracker: IdleTracker,
-  config: CoordinatorConfiguration,
-  nc: NatsConnection,
+function extractProjectId(subject: string): string | null {
+  const parts = subject.split('.');
+  if (parts.length >= 2 && parts[0] === 'coord') {
+    return parts[1] ?? null;
+  }
+  return null;
+}
+
+/**
+ * Create a service layer for a specific project
+ */
+function createProjectServiceLayer(
+  context: ProjectContext,
+  nc: NatsConnection
 ): CoordinatorServiceLayer {
+  const { coordinator, targetRegistry, spinUpManager, projectId } = context;
+
   return {
     // Agent operations
     async listAgents(filter) {
@@ -106,8 +116,7 @@ function createServiceLayer(
     },
 
     async requestAgentShutdown(guid, graceful) {
-      // Publish shutdown request to the agent's inbox
-      nc.publish(`coord.${config.projectId}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
+      nc.publish(`coord.${projectId}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
     },
 
     // Work operations
@@ -134,7 +143,6 @@ function createServiceLayer(
     },
 
     async cancelWorkItem(id) {
-      // Mark work as failed/cancelled
       await coordinator.recordError(id, 'Cancelled by user', false);
     },
 
@@ -143,7 +151,6 @@ function createServiceLayer(
       const coordStats = coordinator.getStats();
       const targets = await targetRegistry.getAllTargets();
 
-      // Count agents by type/status
       const agents = await coordinator.findWorkers('general');
       const byType: Record<string, number> = {};
       const byStatus: Record<string, number> = {};
@@ -153,7 +160,6 @@ function createServiceLayer(
         byStatus[agent.status] = (byStatus[agent.status] || 0) + 1;
       }
 
-      // Count targets by status
       const targetStats = {
         total: targets.length,
         available: targets.filter(t => t.status === 'available').length,
@@ -208,10 +214,8 @@ function createServiceLayer(
       const target = await targetRegistry.getTarget(idOrName);
       if (!target) throw new Error(`Target not found: ${idOrName}`);
 
-      // Run health check
       const startTime = Date.now();
       try {
-        // Simple connectivity test based on mechanism
         await targetRegistry.updateTargetHealth(target.id, 'healthy');
         return {
           healthy: true,
@@ -250,18 +254,475 @@ function createServiceLayer(
 }
 
 /**
- * Start the coordinator service
+ * Create a multi-tenant service layer that routes to project contexts
+ */
+function createMultiTenantServiceLayer(
+  projectManager: ProjectManager,
+  nc: NatsConnection,
+  defaultProjectId: string
+): CoordinatorServiceLayer & { getGlobalStats: () => Promise<any>; listProjects: () => string[] } {
+  // Helper to get project context (uses default if not specified)
+  const getContext = async (projectId?: string): Promise<ProjectContext> => {
+    const pid = projectId || defaultProjectId;
+    return projectManager.getOrCreateProject(pid);
+  };
+
+  return {
+    // Agent operations
+    async listAgents(filter) {
+      const context = await getContext((filter as any)?.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.listAgents(filter);
+    },
+
+    async getAgent(guid) {
+      // Search across all projects
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const agent = await layer.getAgent(guid);
+        if (agent) return agent;
+      }
+      return null;
+    },
+
+    async requestAgentShutdown(guid, graceful) {
+      // Find which project has this agent
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const agent = await layer.getAgent(guid);
+        if (agent) {
+          await layer.requestAgentShutdown(guid, graceful);
+          return;
+        }
+      }
+      throw new Error(`Agent not found: ${guid}`);
+    },
+
+    // Work operations
+    async listWork(filter) {
+      const context = await getContext((filter as any)?.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.listWork(filter);
+    },
+
+    async submitWork(request: any) {
+      const context = await getContext(request.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.submitWork(request);
+    },
+
+    async getWorkItem(id) {
+      // Search across all projects
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const work = await layer.getWorkItem(id);
+        if (work) return work;
+      }
+      return null;
+    },
+
+    async cancelWorkItem(id) {
+      // Find which project has this work item
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const work = await layer.getWorkItem(id);
+        if (work) {
+          await layer.cancelWorkItem(id);
+          return;
+        }
+      }
+      throw new Error(`Work item not found: ${id}`);
+    },
+
+    // Stats operations (returns stats for default project)
+    async getStats() {
+      const context = await getContext();
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.getStats();
+    },
+
+    // Target operations
+    async listTargets(filter) {
+      const context = await getContext((filter as any)?.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.listTargets(filter);
+    },
+
+    async getTarget(idOrName) {
+      // Search across all projects
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const target = await layer.getTarget(idOrName);
+        if (target) return target;
+      }
+      return null;
+    },
+
+    async registerTarget(request: any) {
+      const context = await getContext(request.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.registerTarget(request);
+    },
+
+    async updateTarget(idOrName, updates: any) {
+      // Find which project has this target
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const target = await layer.getTarget(idOrName);
+        if (target) {
+          return layer.updateTarget(idOrName, updates);
+        }
+      }
+      throw new Error(`Target not found: ${idOrName}`);
+    },
+
+    async removeTarget(idOrName) {
+      // Find which project has this target
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const target = await layer.getTarget(idOrName);
+        if (target) {
+          await layer.removeTarget(idOrName);
+          return;
+        }
+      }
+      throw new Error(`Target not found: ${idOrName}`);
+    },
+
+    async testTargetHealth(idOrName) {
+      // Find which project has this target
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const target = await layer.getTarget(idOrName);
+        if (target) {
+          return layer.testTargetHealth(idOrName);
+        }
+      }
+      throw new Error(`Target not found: ${idOrName}`);
+    },
+
+    async triggerTargetSpinUp(idOrName) {
+      // Find which project has this target
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const target = await layer.getTarget(idOrName);
+        if (target) {
+          return layer.triggerTargetSpinUp(idOrName);
+        }
+      }
+      throw new Error(`Target not found: ${idOrName}`);
+    },
+
+    async disableTarget(idOrName) {
+      // Find which project has this target
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const target = await layer.getTarget(idOrName);
+        if (target) {
+          await layer.disableTarget(idOrName);
+          return;
+        }
+      }
+      throw new Error(`Target not found: ${idOrName}`);
+    },
+
+    async enableTarget(idOrName) {
+      // Find which project has this target
+      for (const context of projectManager.getAllProjects()) {
+        const layer = createProjectServiceLayer(context, nc);
+        const target = await layer.getTarget(idOrName);
+        if (target) {
+          await layer.enableTarget(idOrName);
+          return;
+        }
+      }
+      throw new Error(`Target not found: ${idOrName}`);
+    },
+
+    // Multi-tenant specific methods
+    async getGlobalStats() {
+      return projectManager.getGlobalStats();
+    },
+
+    listProjects() {
+      return projectManager.listProjects();
+    },
+  };
+}
+
+/**
+ * Setup NATS request handlers with wildcard subscriptions (multi-tenant)
+ */
+function setupNATSHandlers(
+  nc: NatsConnection,
+  projectManager: ProjectManager
+): void {
+  const encode = (data: any) => JSON.stringify(data);
+  const decode = (data: Uint8Array) => JSON.parse(new TextDecoder().decode(data));
+
+  // Helper to handle requests with project context
+  const handleWithProject = (
+    handler: (context: ProjectContext, payload: any) => Promise<any>
+  ) => {
+    return async (err: Error | null, msg: any) => {
+      if (err) return;
+      try {
+        const projectId = extractProjectId(msg.subject);
+        if (!projectId) {
+          msg.respond(encode({ error: 'Invalid subject: could not extract project ID' }));
+          return;
+        }
+
+        const context = await projectManager.getOrCreateProject(projectId);
+        const payload = msg.data.length > 0 ? decode(msg.data) : {};
+        const result = await handler(context, payload);
+        msg.respond(encode(result));
+      } catch (error) {
+        msg.respond(encode({ error: String(error) }));
+      }
+    };
+  };
+
+  // Stats endpoint
+  nc.subscribe('coord.*.stats', {
+    callback: handleWithProject(async (context) => {
+      return context.coordinator.getStats();
+    }),
+  });
+
+  // Global stats (across all projects)
+  nc.subscribe('coord.global.stats', {
+    callback: async (err, msg) => {
+      if (err) return;
+      try {
+        const stats = await projectManager.getGlobalStats();
+        msg.respond(encode(stats));
+      } catch (error) {
+        msg.respond(encode({ error: String(error) }));
+      }
+    },
+  });
+
+  // List projects
+  nc.subscribe('coord.global.projects', {
+    callback: async (err, msg) => {
+      if (err) return;
+      try {
+        const projects = projectManager.listProjects();
+        msg.respond(encode({ projects }));
+      } catch (error) {
+        msg.respond(encode({ error: String(error) }));
+      }
+    },
+  });
+
+  // Agents list
+  nc.subscribe('coord.*.agents.list', {
+    callback: handleWithProject(async (context, filter) => {
+      const workers = await context.coordinator.findWorkers(filter.capability || 'general');
+      return workers;
+    }),
+  });
+
+  // Work list
+  nc.subscribe('coord.*.work.list', {
+    callback: handleWithProject(async (context, filter) => {
+      return context.coordinator.getAssignments(filter);
+    }),
+  });
+
+  // Work submit
+  nc.subscribe('coord.*.work.submit', {
+    callback: handleWithProject(async (context, request) => {
+      return context.coordinator.submitClassifiedWork({
+        ...request,
+        taskId: request.taskId || uuidv4(),
+      });
+    }),
+  });
+
+  // Work get
+  nc.subscribe('coord.*.work.get', {
+    callback: handleWithProject(async (context, { id }) => {
+      return context.coordinator.getAssignment(id);
+    }),
+  });
+
+  // Work status (for watching)
+  nc.subscribe('coord.*.work.status.*', {
+    callback: async (err, msg) => {
+      if (err) return;
+      try {
+        const parts = msg.subject.split('.');
+        const projectId = parts[1];
+        const workId = parts[parts.length - 1];
+
+        if (!projectId || !workId) {
+          msg.respond(encode({ error: 'Invalid subject' }));
+          return;
+        }
+
+        const context = await projectManager.getOrCreateProject(projectId);
+        const work = context.coordinator.getAssignment(workId);
+        msg.respond(encode(work));
+      } catch (error) {
+        msg.respond(encode({ error: String(error) }));
+      }
+    },
+  });
+
+  // Work cancel
+  nc.subscribe('coord.*.work.cancel', {
+    callback: handleWithProject(async (context, { id }) => {
+      await context.coordinator.recordError(id, 'Cancelled by user', false);
+      return { success: true };
+    }),
+  });
+
+  // Targets list
+  nc.subscribe('coord.*.targets.list', {
+    callback: handleWithProject(async (context, filter) => {
+      return context.targetRegistry.queryTargets(filter);
+    }),
+  });
+
+  // Targets register
+  nc.subscribe('coord.*.targets.register', {
+    callback: handleWithProject(async (context, request) => {
+      return context.targetRegistry.registerTarget(request);
+    }),
+  });
+
+  // Targets get
+  nc.subscribe('coord.*.targets.get', {
+    callback: handleWithProject(async (context, { target }) => {
+      return context.targetRegistry.getTarget(target);
+    }),
+  });
+
+  // Targets update
+  nc.subscribe('coord.*.targets.update', {
+    callback: handleWithProject(async (context, request) => {
+      return context.targetRegistry.updateTarget(request);
+    }),
+  });
+
+  // Targets remove
+  nc.subscribe('coord.*.targets.remove', {
+    callback: handleWithProject(async (context, { target }) => {
+      await context.targetRegistry.removeTarget(target);
+      return { success: true };
+    }),
+  });
+
+  // Targets test (health check)
+  nc.subscribe('coord.*.targets.test', {
+    callback: handleWithProject(async (context, { target: targetId }) => {
+      const target = await context.targetRegistry.getTarget(targetId);
+      if (!target) {
+        throw new Error('Target not found');
+      }
+
+      const startTime = Date.now();
+      try {
+        await context.targetRegistry.updateTargetHealth(target.id, 'healthy');
+        return {
+          healthy: true,
+          latencyMs: Date.now() - startTime,
+        };
+      } catch (healthError: any) {
+        await context.targetRegistry.updateTargetHealth(target.id, 'unhealthy', healthError.message);
+        return {
+          healthy: false,
+          error: healthError.message,
+          latencyMs: Date.now() - startTime,
+        };
+      }
+    }),
+  });
+
+  // Targets enable
+  nc.subscribe('coord.*.targets.enable', {
+    callback: handleWithProject(async (context, { target }) => {
+      await context.targetRegistry.updateTargetStatus(target, 'available');
+      return { success: true };
+    }),
+  });
+
+  // Targets disable
+  nc.subscribe('coord.*.targets.disable', {
+    callback: handleWithProject(async (context, { target }) => {
+      await context.targetRegistry.updateTargetStatus(target, 'disabled');
+      return { success: true };
+    }),
+  });
+
+  // Agent shutdown
+  nc.subscribe('coord.*.agents.shutdown', {
+    callback: async (err, msg) => {
+      if (err) return;
+      try {
+        const projectId = extractProjectId(msg.subject);
+        if (!projectId) {
+          msg.respond(encode({ error: 'Invalid subject' }));
+          return;
+        }
+
+        const { guid, graceful = true } = decode(msg.data);
+        nc.publish(`coord.${projectId}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
+        msg.respond(encode({ success: true }));
+      } catch (error) {
+        msg.respond(encode({ error: String(error) }));
+      }
+    },
+  });
+
+  // Spin-up trigger
+  nc.subscribe('coord.*.spin-up.trigger', {
+    callback: handleWithProject(async (context, { target: targetId }) => {
+      const target = await context.targetRegistry.getTarget(targetId);
+      if (!target) {
+        throw new Error('Target not found');
+      }
+      const tracked = await context.spinUpManager.requestSpinUp(target);
+      return {
+        operationId: tracked.id,
+        targetName: target.name,
+        status: tracked.status,
+      };
+    }),
+  });
+
+  // Spin-up status
+  nc.subscribe('coord.*.spin-up.status', {
+    callback: handleWithProject(async (context, { operationId }) => {
+      return context.spinUpManager.getTracked(operationId);
+    }),
+  });
+
+  // Spin-up list
+  nc.subscribe('coord.*.spin-up.list', {
+    callback: handleWithProject(async (context) => {
+      return context.spinUpManager.getAllTracked();
+    }),
+  });
+
+  console.log('  NATS request handlers registered (multi-tenant wildcard mode)');
+}
+
+/**
+ * Start the coordinator service (multi-tenant)
  */
 export async function startService(): Promise<void> {
   if (state?.isRunning) {
     throw new Error('Service is already running');
   }
 
-  console.log('Starting Coordinator Service...');
+  console.log('Starting Coordinator Service (Multi-Tenant)...');
 
   // Load configuration
   const config = loadConfig();
-  console.log(`  Project ID: ${config.projectId}`);
+  console.log(`  Default Project ID: ${config.projectId}`);
   console.log(`  NATS URL: ${config.nats.url}`);
   console.log(`  API Port: ${config.api.port}`);
 
@@ -270,112 +731,42 @@ export async function startService(): Promise<void> {
     console.log('Connecting to NATS...');
     const nc = await natsConnect({
       servers: config.nats.url,
-      name: `coordinator-service-${config.projectId}`,
-      maxReconnectAttempts: -1, // Unlimited reconnects
+      name: 'coordinator-service-multitenant',
+      maxReconnectAttempts: -1,
       reconnectTimeWait: 2000,
     });
     console.log('  Connected to NATS');
 
-    // Initialize Target Registry
-    console.log('Initializing Target Registry...');
-    const targetRegistry = new TargetRegistry(nc, config.projectId);
-    await targetRegistry.initialize();
-    console.log('  Target Registry initialized');
+    // Initialize Project Manager
+    console.log('Initializing Project Manager...');
+    const projectManager = new ProjectManager(nc, config);
+    console.log('  Project Manager initialized');
 
-    // Initialize Spin-Up Manager
-    console.log('Initializing Spin-Up Manager...');
-    const spinUpManager = new SpinUpManager({
-      defaultTimeoutMs: config.spinUp.defaultTimeoutMs,
-      maxConcurrent: config.spinUp.maxConcurrent,
-    });
-    console.log('  Spin-Up Manager initialized');
-
-    // Initialize Idle Tracker
-    console.log('Initializing Idle Tracker...');
-    const idleTracker = new IdleTracker({
-      idleTimeoutMs: config.idle.defaultTimeoutMs,
-      checkIntervalMs: config.idle.checkIntervalMs,
-    });
-    idleTracker.start();
-    console.log('  Idle Tracker started');
-
-    // Initialize Health Check Runner
-    console.log('Initializing Health Check Runner...');
-    const healthCheckRunner = new HealthCheckRunner(
-      targetRegistry,
-      config.spinUp.healthCheck.intervalMs,
-    );
-    healthCheckRunner.start();
-    console.log('  Health Check Runner started');
-
-    // Initialize Extended Coordinator
-    console.log('Initializing Coordinator...');
-    const coordinatorConfig: ExtendedCoordinatorConfig = {
-      projectId: config.projectId,
-      coordinatorGuid: uuidv4(),
-      username: process.env.USER || 'coordinator',
-      staleThresholdMs: 300000,
-      cleanupIntervalMs: 60000,
-      routing: {
-        boundaryConfigs: config.boundaryConfigs,
-      },
-    };
-    const coordinator = new ExtendedCoordinator(coordinatorConfig);
-    console.log('  Coordinator initialized');
-
-    // Wire up spin-up triggers
-    coordinator.on('spin-up-trigger', async (event) => {
-      console.log(`Spin-up trigger: ${event.agentType} for capability ${event.capability}`);
-
-      // Find a suitable target
-      const targets = await targetRegistry.queryTargets({
-        agentType: event.agentType,
-        capability: event.capability,
-        boundary: event.boundary,
-        status: 'available',
-      });
-
-      if (targets.length > 0) {
-        const target = targets[0]!; // Pick first available (type assertion safe after length check)
-        console.log(`  Starting spin-up for target: ${target.name}`);
-        await spinUpManager.requestSpinUp(target, event.workItemId, event.capability);
-      } else {
-        console.log('  No suitable targets available for spin-up');
-      }
-    });
-
-    // Wire up idle shutdown signals
-    idleTracker.on('shutdown-signal', async (agentGuid: string) => {
-      console.log(`Idle shutdown signal for agent: ${agentGuid}`);
-      nc.publish(`coord.${config.projectId}.agents.${agentGuid}.shutdown`, JSON.stringify({
-        reason: 'idle-timeout',
-        graceful: true,
-      }));
-    });
+    // Pre-create default project if specified
+    if (config.projectId && config.projectId !== 'default') {
+      console.log(`  Pre-creating default project: ${config.projectId}`);
+      await projectManager.getOrCreateProject(config.projectId);
+    }
 
     // Initialize state
     state = {
       config,
       nc,
-      coordinator,
-      targetRegistry,
-      spinUpManager,
-      idleTracker,
-      healthCheckRunner,
+      projectManager,
       isRunning: false,
     };
+
+    // Setup NATS request handlers (wildcard)
+    setupNATSHandlers(nc, projectManager);
 
     // Start REST API if enabled
     if (config.api.enabled) {
       console.log(`Starting REST API on ${config.api.host}:${config.api.port}...`);
 
-      const serviceLayer = createServiceLayer(
-        coordinator,
-        targetRegistry,
-        spinUpManager,
-        idleTracker,
-        config,
+      const serviceLayer = createMultiTenantServiceLayer(
+        projectManager,
         nc,
+        config.projectId
       );
 
       const app = createExpressApp(config.api, serviceLayer);
@@ -383,11 +774,8 @@ export async function startService(): Promise<void> {
       console.log('  REST API started');
     }
 
-    // Setup NATS request handlers for CLI/other clients
-    setupNATSHandlers(nc, config, coordinator, targetRegistry, spinUpManager, idleTracker);
-
     state.isRunning = true;
-    console.log('\n=== Coordinator Service Ready ===\n');
+    console.log('\n=== Coordinator Service Ready (Multi-Tenant) ===\n');
 
     // Handle shutdown signals
     const shutdown = async () => {
@@ -410,319 +798,6 @@ export async function startService(): Promise<void> {
 }
 
 /**
- * Setup NATS request handlers for CLI and other clients
- */
-function setupNATSHandlers(
-  nc: NatsConnection,
-  config: CoordinatorConfiguration,
-  coordinator: ExtendedCoordinator,
-  targetRegistry: TargetRegistry,
-  spinUpManager: SpinUpManager,
-  _idleTracker: IdleTracker,
-): void {
-  const prefix = `coord.${config.projectId}`;
-  const encode = (data: any) => JSON.stringify(data);
-  const decode = (data: Uint8Array) => JSON.parse(new TextDecoder().decode(data));
-
-  // Stats endpoint
-  nc.subscribe(`${prefix}.stats`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      const stats = coordinator.getStats();
-      msg.respond(encode(stats));
-    },
-  });
-
-  // Agents list
-  nc.subscribe(`${prefix}.agents.list`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const filter = msg.data.length > 0 ? decode(msg.data) : {};
-        const workers = await coordinator.findWorkers(filter.capability || 'general');
-        msg.respond(encode(workers));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Work list
-  nc.subscribe(`${prefix}.work.list`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const filter = msg.data.length > 0 ? decode(msg.data) : {};
-        const work = coordinator.getAssignments(filter);
-        msg.respond(encode(work));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Work submit
-  nc.subscribe(`${prefix}.work.submit`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const request = decode(msg.data);
-        const result = await coordinator.submitClassifiedWork({
-          ...request,
-          taskId: request.taskId || uuidv4(),
-        });
-        msg.respond(encode(result));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Work get
-  nc.subscribe(`${prefix}.work.get`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { id } = decode(msg.data);
-        const work = coordinator.getAssignment(id);
-        msg.respond(encode(work));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets list
-  nc.subscribe(`${prefix}.targets.list`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const filter = msg.data.length > 0 ? decode(msg.data) : {};
-        const targets = await targetRegistry.queryTargets(filter);
-        msg.respond(encode(targets));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets register
-  nc.subscribe(`${prefix}.targets.register`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const request = decode(msg.data);
-        const target = await targetRegistry.registerTarget(request);
-        msg.respond(encode(target));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets get
-  nc.subscribe(`${prefix}.targets.get`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { target } = decode(msg.data);
-        const result = await targetRegistry.getTarget(target);
-        msg.respond(encode(result));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets update
-  nc.subscribe(`${prefix}.targets.update`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const request = decode(msg.data);
-        const result = await targetRegistry.updateTarget(request);
-        msg.respond(encode(result));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets remove
-  nc.subscribe(`${prefix}.targets.remove`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { target } = decode(msg.data);
-        await targetRegistry.removeTarget(target);
-        msg.respond(encode({ success: true }));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets test (health check)
-  nc.subscribe(`${prefix}.targets.test`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { target: targetId } = decode(msg.data);
-        const target = await targetRegistry.getTarget(targetId);
-        if (!target) {
-          msg.respond(encode({ error: 'Target not found' }));
-          return;
-        }
-
-        const startTime = Date.now();
-        try {
-          await targetRegistry.updateTargetHealth(target.id, 'healthy');
-          msg.respond(encode({
-            healthy: true,
-            latencyMs: Date.now() - startTime,
-          }));
-        } catch (healthError: any) {
-          await targetRegistry.updateTargetHealth(target.id, 'unhealthy', healthError.message);
-          msg.respond(encode({
-            healthy: false,
-            error: healthError.message,
-            latencyMs: Date.now() - startTime,
-          }));
-        }
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets enable
-  nc.subscribe(`${prefix}.targets.enable`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { target } = decode(msg.data);
-        await targetRegistry.updateTargetStatus(target, 'available');
-        msg.respond(encode({ success: true }));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Targets disable
-  nc.subscribe(`${prefix}.targets.disable`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { target } = decode(msg.data);
-        await targetRegistry.updateTargetStatus(target, 'disabled');
-        msg.respond(encode({ success: true }));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Work status (for watching)
-  nc.subscribe(`${prefix}.work.status.*`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const workId = msg.subject.split('.').pop();
-        if (!workId) {
-          msg.respond(encode({ error: 'Work ID not provided' }));
-          return;
-        }
-        const work = coordinator.getAssignment(workId);
-        msg.respond(encode(work));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Work cancel
-  nc.subscribe(`${prefix}.work.cancel`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { id } = decode(msg.data);
-        await coordinator.recordError(id, 'Cancelled by user', false);
-        msg.respond(encode({ success: true }));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Agent shutdown
-  nc.subscribe(`${prefix}.agents.shutdown`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { guid, graceful = true } = decode(msg.data);
-        nc.publish(`${prefix}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
-        msg.respond(encode({ success: true }));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Spin-up trigger
-  nc.subscribe(`${prefix}.spin-up.trigger`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { target: targetId } = decode(msg.data);
-        const target = await targetRegistry.getTarget(targetId);
-        if (!target) {
-          msg.respond(encode({ error: 'Target not found' }));
-          return;
-        }
-        const tracked = await spinUpManager.requestSpinUp(target);
-        msg.respond(encode({
-          operationId: tracked.id,
-          targetName: target.name,
-          status: tracked.status,
-        }));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Spin-up status
-  nc.subscribe(`${prefix}.spin-up.status`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const { operationId } = decode(msg.data);
-        const tracked = spinUpManager.getTracked(operationId);
-        msg.respond(encode(tracked));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  // Spin-up list
-  nc.subscribe(`${prefix}.spin-up.list`, {
-    callback: async (err, msg) => {
-      if (err) return;
-      try {
-        const operations = spinUpManager.getAllTracked();
-        msg.respond(encode(operations));
-      } catch (error) {
-        msg.respond(encode({ error: String(error) }));
-      }
-    },
-  });
-
-  console.log('  NATS request handlers registered');
-}
-
-/**
  * Stop the coordinator service
  */
 export async function stopService(): Promise<void> {
@@ -732,34 +807,10 @@ export async function stopService(): Promise<void> {
 
   console.log('Stopping Coordinator Service...');
 
-  // Stop health check runner
-  if (state.healthCheckRunner) {
-    state.healthCheckRunner.stop();
-    console.log('  Health Check Runner stopped');
-  }
-
-  // Stop idle tracker
-  if (state.idleTracker) {
-    state.idleTracker.shutdown();
-    console.log('  Idle Tracker stopped');
-  }
-
-  // Stop spin-up manager
-  if (state.spinUpManager) {
-    state.spinUpManager.destroy();
-    console.log('  Spin-Up Manager stopped');
-  }
-
-  // Shutdown coordinator
-  if (state.coordinator) {
-    state.coordinator.shutdown();
-    console.log('  Coordinator stopped');
-  }
-
-  // Close target registry
-  if (state.targetRegistry) {
-    await state.targetRegistry.close();
-    console.log('  Target Registry closed');
+  // Shutdown all projects via ProjectManager
+  if (state.projectManager) {
+    await state.projectManager.shutdown();
+    console.log('  All project contexts shut down');
   }
 
   // Close NATS connection
@@ -778,9 +829,23 @@ export async function stopService(): Promise<void> {
 /**
  * Get service status
  */
-export function getServiceStatus(): { running: boolean; config?: CoordinatorConfiguration } {
+export function getServiceStatus(): {
+  running: boolean;
+  config?: CoordinatorConfiguration;
+  projectCount?: number;
+  projects?: string[];
+} {
   return {
     running: state?.isRunning ?? false,
     config: state?.config,
+    projectCount: state?.projectManager?.getProjectCount(),
+    projects: state?.projectManager?.listProjects(),
   };
+}
+
+/**
+ * Get the project manager (for testing or advanced usage)
+ */
+export function getProjectManager(): ProjectManager | null {
+  return state?.projectManager ?? null;
 }

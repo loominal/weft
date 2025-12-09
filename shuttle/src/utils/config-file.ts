@@ -22,10 +22,30 @@ function ensureConfigDir(): void {
 }
 
 /**
+ * Options for loading configuration
+ */
+export interface LoadConfigOptions {
+  configPath?: string;
+  projectOverride?: string;
+}
+
+/**
  * Load configuration from file and environment variables
  * Environment variables take precedence over file config
+ * CLI --project flag takes precedence over everything
  */
-export function loadConfig(configPath?: string): CLIConfiguration {
+export function loadConfig(configPathOrOptions?: string | LoadConfigOptions): CLIConfiguration {
+  // Handle both old-style string argument and new options object
+  let configPath: string | undefined;
+  let projectOverride: string | undefined;
+
+  if (typeof configPathOrOptions === 'string') {
+    configPath = configPathOrOptions;
+  } else if (configPathOrOptions) {
+    configPath = configPathOrOptions.configPath;
+    projectOverride = configPathOrOptions.projectOverride;
+  }
+
   const filePath = configPath || CONFIG_FILE;
 
   let fileConfig: Partial<CLIConfiguration> = {};
@@ -40,9 +60,10 @@ export function loadConfig(configPath?: string): CLIConfiguration {
   }
 
   // Merge with defaults and environment variables
+  // Priority: CLI --project > env var > file config > default
   const config: CLIConfiguration = {
     natsUrl: process.env.NATS_URL || fileConfig.natsUrl || DEFAULT_CLI_CONFIG.natsUrl!,
-    projectId: process.env.PROJECT_ID || fileConfig.projectId || 'default',
+    projectId: projectOverride || process.env.PROJECT_ID || fileConfig.projectId || 'default',
     defaultBoundary: fileConfig.defaultBoundary,
     defaultPriority: fileConfig.defaultPriority || DEFAULT_CLI_CONFIG.defaultPriority,
     outputFormat: fileConfig.outputFormat || DEFAULT_CLI_CONFIG.outputFormat,

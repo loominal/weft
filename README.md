@@ -83,12 +83,37 @@ docker-compose up -d
 # Start NATS
 docker run -d --name nats -p 4222:4222 nats:latest -js
 
-# Start Weft
+# Start Weft (Multi-Tenant)
+# Note: LOOM_PROJECT_ID is now optional - Weft auto-discovers projects
 docker run -d --name weft \
   -p 3000:3000 \
   -e NATS_URL=nats://host.docker.internal:4222 \
-  -e LOOM_PROJECT_ID=my-project \
   ghcr.io/mdlopresti/loom-weft:latest
+```
+
+## Multi-Tenant Architecture
+
+Weft now supports multiple projects in a single deployment. Projects are auto-discovered when agents or clients first connect.
+
+### How It Works
+
+- Single Weft instance handles all projects via NATS wildcard subscriptions (`coord.*.*`)
+- Each project gets isolated: coordinator, target registry, idle tracker
+- Global stats endpoint shows aggregate metrics across all projects
+
+### Shuttle Multi-Project Usage
+
+```bash
+# List all active projects
+shuttle projects
+
+# Operate on a specific project (overrides config)
+shuttle --project my-app agents
+shuttle --project other-app work list
+shuttle -p my-app stats
+
+# Configure default project
+shuttle config set projectId my-default-project
 ```
 
 ### 2. Install Shuttle

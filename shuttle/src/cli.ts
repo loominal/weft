@@ -16,6 +16,7 @@ import { statsCommand } from './commands/stats.js';
 import { spinUpCommand } from './commands/spin-up.js';
 import { shutdownCommand } from './commands/shutdown.js';
 import { targetsCommand } from './commands/targets.js';
+import { projectsCommand } from './commands/projects.js';
 
 // Get package.json version
 const __filename = fileURLToPath(import.meta.url);
@@ -28,6 +29,7 @@ export interface GlobalOptions {
   json?: boolean;
   config?: string;
   quiet?: boolean;
+  project?: string;
 }
 
 export function createCLI(): Command {
@@ -42,7 +44,8 @@ export function createCLI(): Command {
   program
     .option('--json', 'Output as JSON instead of formatted tables')
     .option('--config <path>', 'Path to config file (default: ~/.loom/config.json)')
-    .option('-q, --quiet', 'Suppress non-essential output');
+    .option('-q, --quiet', 'Suppress non-essential output')
+    .option('-p, --project <id>', 'Project ID to operate on (overrides config)');
 
   // Register commands
   program.addCommand(configCommand());
@@ -54,6 +57,7 @@ export function createCLI(): Command {
   program.addCommand(spinUpCommand());
   program.addCommand(shutdownCommand());
   program.addCommand(targetsCommand());
+  program.addCommand(projectsCommand());
 
   return program;
 }
@@ -71,5 +75,6 @@ export function getGlobalOptions(command: Command): GlobalOptions {
     json: parent.opts().json,
     config: parent.opts().config,
     quiet: parent.opts().quiet,
+    project: parent.opts().project,
   };
 }

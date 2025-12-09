@@ -29,7 +29,10 @@ export function submitCommand(): Command {
       const spinner = ora();
 
       try {
-        const config = loadConfig(globalOpts.config);
+        const config = loadConfig({
+          configPath: globalOpts.config,
+          projectOverride: globalOpts.project,
+        });
 
         // Interactive mode or missing required fields
         const needsInteractive =
