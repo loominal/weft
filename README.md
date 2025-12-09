@@ -70,9 +70,25 @@ Together they enable:
 
 ### 1. Start NATS and Weft
 
+**Option A: Docker Compose (easiest)**
+
 ```bash
 cd coordinator-system
 docker-compose up -d
+```
+
+**Option B: Pull from GitHub Container Registry**
+
+```bash
+# Start NATS
+docker run -d --name nats -p 4222:4222 nats:latest -js
+
+# Start Weft
+docker run -d --name weft \
+  -p 3000:3000 \
+  -e NATS_URL=nats://host.docker.internal:4222 \
+  -e LOOM_PROJECT_ID=my-project \
+  ghcr.io/mdlopresti/loom-weft:latest
 ```
 
 ### 2. Install Shuttle
