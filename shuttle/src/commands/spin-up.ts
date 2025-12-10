@@ -4,7 +4,6 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import type { SpinUpResult } from '@loom/shared';
 import { loadConfig } from '../utils/config-file.js';
 import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
 import { output, success, error, info, formatKeyValue } from '../utils/output.js';
@@ -80,14 +79,19 @@ export function spinUpCommand(): Command {
           { timeout: 30000 } // Longer timeout for spin-up
         );
 
-        const result: SpinUpResult = JSON.parse(
+        const result = JSON.parse(
           new TextDecoder().decode(response.data)
         );
 
         await closeNATSConnection();
 
+        // Handle both old format (success boolean) and new format (status string)
+        const isSuccess = result.success === true ||
+          result.status === 'in-progress' ||
+          result.status === 'completed';
+
         if (!globalOpts.quiet) {
-          if (result.success) {
+          if (isSuccess) {
             spinner.succeed('Agent spin-up initiated');
           } else {
             spinner.fail('Spin-up failed');
@@ -98,14 +102,15 @@ export function spinUpCommand(): Command {
         if (globalOpts.json) {
           output(result, globalOpts);
         } else {
-          if (result.success) {
+          if (isSuccess) {
             success('Agent spin-up triggered successfully!', globalOpts);
             console.log();
             console.log(
               formatKeyValue({
-                'Target ID': result.targetId,
+                'Operation ID': result.operationId || result.targetId,
                 'Target Name': result.targetName,
-                'Timestamp': new Date(result.timestamp).toLocaleString(),
+                'Status': result.status || 'initiated',
+                'Timestamp': result.timestamp ? new Date(result.timestamp).toLocaleString() : new Date().toLocaleString(),
               })
             );
 
@@ -114,7 +119,7 @@ export function spinUpCommand(): Command {
               console.log(formatKeyValue(result.mechanismResult));
             }
           } else {
-            error(`Spin-up failed: ${result.error}`, globalOpts);
+            error(`Spin-up failed: ${result.error || result.message || 'Unknown error'}`, globalOpts);
             process.exit(1);
           }
         }

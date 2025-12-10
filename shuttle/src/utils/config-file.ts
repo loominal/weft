@@ -141,15 +141,8 @@ export function validateConfig(config: Partial<CLIConfiguration>): string[] {
     errors.push('defaultPriority must be between 1 and 10');
   }
 
-  if (
-    config.defaultBoundary &&
-    !['corporate', 'corporate-adjacent', 'personal', 'open-source'].includes(
-      config.defaultBoundary
-    )
-  ) {
-    errors.push(
-      'defaultBoundary must be one of: corporate, corporate-adjacent, personal, open-source'
-    );
+  if (config.defaultBoundary && config.defaultBoundary.trim().length === 0) {
+    errors.push('defaultBoundary must be a non-empty string');
   }
 
   if (config.outputFormat && !['table', 'json'].includes(config.outputFormat)) {
