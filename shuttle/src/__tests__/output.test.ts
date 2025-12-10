@@ -2,7 +2,7 @@
  * Tests for output formatting utilities
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   output,
   success,

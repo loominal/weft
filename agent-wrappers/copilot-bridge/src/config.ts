@@ -1,7 +1,7 @@
 import type { Boundary } from '@loom/shared';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { homedir } from 'os';
+import { homedir, hostname } from 'os';
 
 /**
  * Bridge configuration
@@ -51,7 +51,7 @@ export interface BridgeConfig {
  * Default configuration values
  */
 const DEFAULTS: Partial<BridgeConfig> = {
-  agentHandle: `copilot-agent-${require('os').hostname()}`,
+  agentHandle: `copilot-agent-${hostname()}`,
   capabilities: ['general'],
   boundaries: ['default'],
   idleTimeoutMs: 300000, // 5 minutes

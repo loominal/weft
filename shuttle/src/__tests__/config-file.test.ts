@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -42,7 +42,6 @@ describe('Config File', () => {
     process.env = originalEnv;
     // Clean up test config
     if (existsSync(TEST_CONFIG)) {
-      const { unlinkSync } = require('fs');
       unlinkSync(TEST_CONFIG);
     }
   });

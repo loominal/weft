@@ -42,7 +42,6 @@ vi.mock('./target-registration.js', () => ({
   unlinkAgentFromTarget: vi.fn(),
 }));
 
-import { spawn } from 'child_process';
 import { createNATSClient } from '@loom/shared';
 import { loadConfig, printConfig } from './config.js';
 import {
