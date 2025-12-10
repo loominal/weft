@@ -95,6 +95,7 @@ export interface WorkStateChangeEvent {
  * - 'work-assigned': Emitted when work is assigned (workItemId: string, agentGuid: string)
  * - 'work-completed': Emitted when work completes (workItemId: string)
  * - 'work-failed': Emitted when work fails (workItemId: string, error: string)
+ * - 'work-cancelled': Emitted when work is cancelled (workItemId: string)
  * - 'routing-decision': Emitted after routing decision (RoutingDecision)
  */
 export class ExtendedCoordinator extends EventEmitter {
@@ -321,6 +322,17 @@ export class ExtendedCoordinator extends EventEmitter {
     const result = await this.baseCoordinator.recordError(workItemId, error, recoverable);
     if (result) {
       this.emit('work-failed', workItemId, error);
+    }
+    return result;
+  }
+
+  /**
+   * Cancel work item
+   */
+  cancelWork(workItemId: string): boolean {
+    const result = this.baseCoordinator.cancelWork(workItemId);
+    if (result) {
+      this.emit('work-cancelled', workItemId);
     }
     return result;
   }

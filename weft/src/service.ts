@@ -143,7 +143,7 @@ function createProjectServiceLayer(
     },
 
     async cancelWorkItem(id) {
-      await coordinator.recordError(id, 'Cancelled by user', false);
+      coordinator.cancelWork(id);
     },
 
     // Stats operations
@@ -580,8 +580,8 @@ function setupNATSHandlers(
   // Work cancel
   nc.subscribe('coord.*.work.cancel', {
     callback: handleWithProject(async (context, { id }) => {
-      await context.coordinator.recordError(id, 'Cancelled by user', false);
-      return { success: true };
+      const success = context.coordinator.cancelWork(id);
+      return { success };
     }),
   });
 
