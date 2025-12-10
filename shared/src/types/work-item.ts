@@ -30,7 +30,7 @@ export type WorkItemStatus =
 export type Priority = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 /**
- * Base work item from nats-mcp-server
+ * Base work item from Loom Warp
  */
 export interface BaseWorkItem {
   id: string;

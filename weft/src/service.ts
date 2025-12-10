@@ -116,7 +116,7 @@ function createProjectServiceLayer(
     },
 
     async requestAgentShutdown(guid, graceful) {
-      nc.publish(`coord.${projectId}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
+      nc.publish(`loom.${projectId}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
     },
 
     // Work operations
@@ -675,7 +675,7 @@ function setupNATSHandlers(
         }
 
         const { guid, graceful = true } = decode(msg.data);
-        nc.publish(`coord.${projectId}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
+        nc.publish(`loom.${projectId}.agents.${guid}.shutdown`, JSON.stringify({ graceful }));
         msg.respond(encode({ success: true }));
       } catch (error) {
         msg.respond(encode({ error: String(error) }));
@@ -737,7 +737,7 @@ export async function startService(): Promise<void> {
     console.log('Connecting to NATS...');
     const nc = await natsConnect({
       servers: config.nats.url,
-      name: 'coordinator-service-multitenant',
+      name: 'loom-weft-multitenant',
       maxReconnectAttempts: -1,
       reconnectTimeWait: 2000,
     });

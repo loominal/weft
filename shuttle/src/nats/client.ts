@@ -25,7 +25,7 @@ export async function getNATSConnection(
 
   const opts: ConnectionOptions = {
     servers: config.natsUrl || 'nats://localhost:4222',
-    name: 'coord-cli',
+    name: 'loom-shuttle',
     maxReconnectAttempts: 10,
     reconnectTimeWait: 1000,
   };
@@ -53,93 +53,96 @@ export async function closeNATSConnection(): Promise<void> {
 }
 
 /**
- * Subject builders for coordinator system
+ * Subject builders for Loom system
  */
-export class CoordinatorSubjects {
+export class LoomSubjects {
   constructor(private projectId: string) {}
 
   // Work submission and management
   workSubmit(): string {
-    return `coord.${this.projectId}.work.submit`;
+    return `loom.${this.projectId}.work.submit`;
   }
 
   workStatus(workItemId: string): string {
-    return `coord.${this.projectId}.work.status.${workItemId}`;
+    return `loom.${this.projectId}.work.status.${workItemId}`;
   }
 
   workList(): string {
-    return `coord.${this.projectId}.work.list`;
+    return `loom.${this.projectId}.work.list`;
   }
 
   workGet(): string {
-    return `coord.${this.projectId}.work.get`;
+    return `loom.${this.projectId}.work.get`;
   }
 
   workCancel(): string {
-    return `coord.${this.projectId}.work.cancel`;
+    return `loom.${this.projectId}.work.cancel`;
   }
 
   // Agent management
   agentsList(): string {
-    return `coord.${this.projectId}.agents.list`;
+    return `loom.${this.projectId}.agents.list`;
   }
 
   agentDetails(agentGuid: string): string {
-    return `coord.${this.projectId}.agents.${agentGuid}`;
+    return `loom.${this.projectId}.agents.${agentGuid}`;
   }
 
   agentShutdown(): string {
-    return `coord.${this.projectId}.agents.shutdown`;
+    return `loom.${this.projectId}.agents.shutdown`;
   }
 
   // Targets
   targetsList(): string {
-    return `coord.${this.projectId}.targets.list`;
+    return `loom.${this.projectId}.targets.list`;
   }
 
   targetsRegister(): string {
-    return `coord.${this.projectId}.targets.register`;
+    return `loom.${this.projectId}.targets.register`;
   }
 
   targetsGet(): string {
-    return `coord.${this.projectId}.targets.get`;
+    return `loom.${this.projectId}.targets.get`;
   }
 
   targetsUpdate(): string {
-    return `coord.${this.projectId}.targets.update`;
+    return `loom.${this.projectId}.targets.update`;
   }
 
   targetsRemove(): string {
-    return `coord.${this.projectId}.targets.remove`;
+    return `loom.${this.projectId}.targets.remove`;
   }
 
   targetsTest(): string {
-    return `coord.${this.projectId}.targets.test`;
+    return `loom.${this.projectId}.targets.test`;
   }
 
   targetsEnable(): string {
-    return `coord.${this.projectId}.targets.enable`;
+    return `loom.${this.projectId}.targets.enable`;
   }
 
   targetsDisable(): string {
-    return `coord.${this.projectId}.targets.disable`;
+    return `loom.${this.projectId}.targets.disable`;
   }
 
   // Spin-up operations
   spinUpTrigger(): string {
-    return `coord.${this.projectId}.spin-up.trigger`;
+    return `loom.${this.projectId}.spinup.trigger`;
   }
 
   spinUpStatus(): string {
-    return `coord.${this.projectId}.spin-up.status`;
+    return `loom.${this.projectId}.spinup.status`;
   }
 
   spinUpList(): string {
-    return `coord.${this.projectId}.spin-up.list`;
+    return `loom.${this.projectId}.spinup.list`;
   }
 
   // Stats
   stats(): string {
-    return `coord.${this.projectId}.stats`;
+    return `loom.${this.projectId}.stats`;
   }
 }
+
+// Keep the old name as an alias for backward compatibility
+export { LoomSubjects as CoordinatorSubjects };

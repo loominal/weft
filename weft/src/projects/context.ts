@@ -108,7 +108,7 @@ export async function createProjectContext(
   // Wire up idle shutdown signals
   idleTracker.on('shutdown-signal', async (agentGuid: string) => {
     console.log(`[${projectId}] Idle shutdown signal for agent: ${agentGuid}`);
-    nc.publish(`coord.${projectId}.agents.${agentGuid}.shutdown`, JSON.stringify({
+    nc.publish(`loom.${projectId}.agents.${agentGuid}.shutdown`, JSON.stringify({
       reason: 'idle-timeout',
       graceful: true,
     }));

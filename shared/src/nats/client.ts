@@ -24,7 +24,7 @@ export interface ConnectedClient {
 export async function createNATSClient(config: NATSConfiguration): Promise<ConnectedClient> {
   const nc = await connect({
     servers: config.url,
-    name: config.name ?? 'coord-client',
+    name: config.name ?? 'loom-client',
     reconnect: true,
     maxReconnectAttempts: config.reconnect?.maxAttempts ?? 10,
     reconnectTimeWait: config.reconnect?.delayMs ?? 1000,

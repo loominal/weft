@@ -5,12 +5,12 @@
 # system. Run this once per machine to enable remote agent spin-up.
 #
 # Prerequisites:
-# - coord CLI installed and configured
+# - shuttle CLI installed and configured
 # - SSH access configured (for SSH-based spin-up)
 #
 # Environment Variables:
-#   NATS_URL                - NATS server URL (optional, for coord CLI config)
-#   LOOM_PROJECT_ID        - Project ID (optional, for coord CLI config)
+#   NATS_URL                - NATS server URL (optional, for shuttle CLI config)
+#   LOOM_PROJECT_ID        - Project ID (optional, for shuttle CLI config)
 #   TARGET_NAME             - Target name (default: hostname-claude)
 #   AGENT_CAPABILITIES      - Comma-separated capabilities (default: general)
 #   AGENT_CLASSIFICATIONS   - Comma-separated classifications (default: personal,open-source)
@@ -49,12 +49,12 @@ if [[ ! -f "$BOOTSTRAP_PATH" ]]; then
   exit 1
 fi
 
-# Verify coord CLI is available
-if ! command -v coord &> /dev/null; then
-  echo "ERROR: coord CLI not found in PATH"
+# Verify shuttle CLI is available
+if ! command -v shuttle &> /dev/null; then
+  echo "ERROR: shuttle CLI not found in PATH"
   echo ""
-  echo "Please install the coord CLI tool:"
-  echo "  cd coordinator-system/coord-cli"
+  echo "Please install the shuttle CLI tool:"
+  echo "  cd coordinator-system/shuttle"
   echo "  npm install -g ."
   echo ""
   exit 1
@@ -64,8 +64,8 @@ fi
 echo ""
 echo "Registering target with coordinator..."
 
-# Use coord CLI to register the target
-coord targets add \
+# Use shuttle CLI to register the target
+shuttle targets add \
   --name "$TARGET_NAME" \
   --type claude-code \
   --mechanism ssh \
@@ -81,7 +81,7 @@ if [[ $? -eq 0 ]]; then
   echo "SUCCESS: Target registered successfully!"
   echo ""
   echo "The coordinator can now spin up Claude Code agents on this machine via:"
-  echo "  coord spin-up --target $TARGET_NAME"
+  echo "  shuttle spin-up --target $TARGET_NAME"
   echo ""
   echo "Or automatically when work matching these criteria arrives:"
   echo "  Capabilities: $AGENT_CAPABILITIES"
