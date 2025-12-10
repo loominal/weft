@@ -158,6 +158,9 @@ export interface CLIConfiguration {
   /** Project ID */
   projectId: string;
 
+  /** Path to NATS credentials file (.creds) */
+  natsCredentials?: string;
+
   /** Default boundary for work submissions */
   defaultBoundary?: string;
 

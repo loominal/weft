@@ -2,7 +2,8 @@
  * NATS client connection helper
  */
 
-import { connect, NatsConnection, ConnectionOptions } from 'nats';
+import { readFile } from 'node:fs/promises';
+import { connect, NatsConnection, ConnectionOptions, credsAuthenticator } from 'nats';
 import type { CLIConfiguration } from '@loom/shared';
 
 export interface NATSClientOptions {
@@ -30,12 +31,17 @@ export async function getNATSConnection(
     reconnectTimeWait: 1000,
   };
 
-  // TODO: Add credentials support if needed
-  // if (config.natsCredentials) {
-  //   opts.authenticator = credsAuthenticator(
-  //     new TextEncoder().encode(config.natsCredentials)
-  //   );
-  // }
+  // Add credentials support for production NATS clusters
+  if (config.natsCredentials) {
+    try {
+      const credsContent = await readFile(config.natsCredentials);
+      opts.authenticator = credsAuthenticator(credsContent);
+    } catch (err) {
+      throw new Error(
+        `Failed to read NATS credentials file: ${config.natsCredentials}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
 
   cachedConnection = await connect(opts);
   return cachedConnection;

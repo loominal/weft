@@ -106,13 +106,7 @@ export class HealthCheckRunner {
           break;
 
         case 'kubernetes':
-          // TODO: Implement kubernetes health check
-          result = {
-            targetId: target.id,
-            healthy: true,
-            responseTimeMs: Date.now() - startTime,
-            timestamp: new Date().toISOString(),
-          };
+          result = await this.checkKubernetes(target);
           break;
 
         default:
@@ -214,6 +208,92 @@ export class HealthCheckRunner {
           targetId: target.id,
           healthy: false,
           error: error.message,
+          responseTimeMs: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        });
+      });
+    });
+  }
+
+  /**
+   * Check Kubernetes target health by verifying namespace access
+   */
+  private async checkKubernetes(target: SpinUpTarget): Promise<HealthCheckResult> {
+    if (target.config.mechanism !== 'kubernetes') {
+      throw new Error('Target is not Kubernetes');
+    }
+
+    const config = target.config.kubernetes;
+    const startTime = Date.now();
+
+    return new Promise((resolve) => {
+      // Use kubectl to check namespace access and job status
+      const args = [
+        'get', 'jobs',
+        '-n', config.namespace,
+        '--no-headers',
+        '-o', 'custom-columns=NAME:.metadata.name,COMPLETIONS:.status.succeeded,FAILED:.status.failed',
+        '--field-selector', `metadata.name=${config.jobNamePrefix}`,
+      ];
+
+      // Try to list jobs with the job prefix - this verifies:
+      // 1. kubectl is available
+      // 2. We have access to the namespace
+      // 3. We can query jobs
+      const kubectl = spawn('kubectl', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      kubectl.stdout?.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      kubectl.stderr?.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      const timeout = setTimeout(() => {
+        kubectl.kill();
+        resolve({
+          targetId: target.id,
+          healthy: false,
+          error: 'kubectl command timed out',
+          responseTimeMs: Date.now() - startTime,
+          timestamp: new Date().toISOString(),
+        });
+      }, target.healthCheck?.timeoutMs ?? 10000);
+
+      kubectl.on('exit', (code) => {
+        clearTimeout(timeout);
+        const responseTimeMs = Date.now() - startTime;
+
+        if (code === 0) {
+          resolve({
+            targetId: target.id,
+            healthy: true,
+            responseTimeMs,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          resolve({
+            targetId: target.id,
+            healthy: false,
+            error: stderr.trim() || `kubectl failed with exit code ${code}`,
+            responseTimeMs,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      kubectl.on('error', (error) => {
+        clearTimeout(timeout);
+        resolve({
+          targetId: target.id,
+          healthy: false,
+          error: `kubectl not available: ${error.message}`,
           responseTimeMs: Date.now() - startTime,
           timestamp: new Date().toISOString(),
         });
