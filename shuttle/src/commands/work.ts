@@ -10,6 +10,7 @@ import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../
 import {
   output,
   error,
+  success,
   createTable,
   colorStatus,
   colorBoundary,
@@ -33,6 +34,12 @@ export function workCommand(): Command {
     .description('Show details of a specific work item')
     .argument('<work-id>', 'Work item ID')
     .action(workShowAction);
+
+  cmd
+    .command('cancel')
+    .description('Cancel a work item')
+    .argument('<work-id>', 'Work item ID')
+    .action(workCancelAction);
 
   return cmd;
 }
@@ -193,6 +200,52 @@ async function workShowAction(workId: string, _options: any, command: Command) {
   } catch (err: any) {
     if (spinner.isSpinning) {
       spinner.fail('Failed to fetch work item');
+    }
+    error(`Error: ${err.message}`, {});
+    process.exit(1);
+  }
+}
+
+async function workCancelAction(workId: string, _options: any, command: Command) {
+  const globalOpts = getGlobalOptions(command);
+  const spinner = ora();
+
+  try {
+    const config = loadConfig({
+      configPath: globalOpts.config,
+      projectOverride: globalOpts.project,
+    });
+
+    if (!globalOpts.quiet) {
+      spinner.start('Cancelling work item...');
+    }
+
+    const nc = await getNATSConnection(config);
+    const subjects = new CoordinatorSubjects(config.projectId);
+
+    const response = await nc.request(
+      subjects.workCancel(),
+      JSON.stringify({ id: workId }),
+      { timeout: 5000 }
+    );
+
+    const result = JSON.parse(new TextDecoder().decode(response.data));
+
+    await closeNATSConnection();
+
+    if (!globalOpts.quiet) {
+      spinner.succeed('Work item cancelled');
+    }
+
+    // Output results
+    if (globalOpts.json) {
+      output(result, globalOpts);
+    } else {
+      success(`Work item ${workId} cancelled`, globalOpts);
+    }
+  } catch (err: any) {
+    if (spinner.isSpinning) {
+      spinner.fail('Failed to cancel work item');
     }
     error(`Error: ${err.message}`, {});
     process.exit(1);

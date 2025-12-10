@@ -70,9 +70,9 @@ export function statsCommand(): Command {
           console.log(
             formatKeyValue({
               'Pending': colorStatus('pending') + ` (${stats.pending})`,
-              'Active': colorStatus('busy') + ` (${stats.active})`,
-              'Completed': colorStatus('online') + ` (${stats.completed})`,
-              'Failed': colorStatus('offline') + ` (${stats.failed})`,
+              'Active': colorStatus('in-progress') + ` (${stats.active})`,
+              'Completed': colorStatus('completed') + ` (${stats.completed})`,
+              'Failed': colorStatus('failed') + ` (${stats.failed})`,
               'Total': stats.total,
             })
           );
