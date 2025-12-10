@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { WorkSubmitRequest } from '@loom/shared';
 import type { CoordinatorServiceLayer } from '../server.js';
 import { APIError } from '../middleware/error.js';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Validates boundary (user-defined, just needs to be non-empty string)
@@ -73,10 +74,12 @@ export function createWorkRouter(service: CoordinatorServiceLayer): Router {
     try {
       const request = req.body as Partial<WorkSubmitRequest>;
 
-      // Validate required fields
+      // Auto-generate taskId if not provided
       if (!request.taskId) {
-        throw new APIError(400, 'taskId is required');
+        request.taskId = uuidv4();
       }
+
+      // Validate required fields
       if (!request.boundary) {
         throw new APIError(400, 'classification is required');
       }

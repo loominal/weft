@@ -473,6 +473,12 @@ function setupNATSHandlers(
           return;
         }
 
+        // Skip reserved project IDs - these are handled by specific subscriptions
+        if (projectId === 'global') {
+          // Don't respond - let the specific coord.global.* subscription handle it
+          return;
+        }
+
         const context = await projectManager.getOrCreateProject(projectId);
         const payload = msg.data.length > 0 ? decode(msg.data) : {};
         const result = await handler(context, payload);
