@@ -27,12 +27,12 @@ NATS_URL=nats://your-server:4222 RUN_INTEGRATION=true pnpm test
 
 ## Test Files
 
-| File | Description |
-|------|-------------|
-| `agent-lifecycle.test.ts` | Agent registration, status updates, discovery, heartbeat |
-| `work-queue.test.ts` | Work submission, claiming, completion events |
-| `target-management.test.ts` | Target registration and linking (planned) |
-| `failure-scenarios.test.ts` | Error handling and recovery (planned) |
+| File | Description | Tests |
+|------|-------------|-------|
+| `agent-lifecycle.test.ts` | Agent registration, status updates, discovery, heartbeat | 6 |
+| `work-queue.test.ts` | Work submission, claiming, completion events | 8 |
+| `multi-agent.test.ts` | Competing consumers, failover, load balancing | 8 |
+| `target-management.test.ts` | Target registration and linking (planned) | - |
 
 ## Test Scenarios
 
@@ -55,6 +55,17 @@ NATS_URL=nats://your-server:4222 RUN_INTEGRATION=true pnpm test
 - ✅ Error events
 - ✅ Stream operations (info, purge)
 
+### Multi-Agent Scenarios (`multi-agent.test.ts`)
+
+- ✅ Distribute work across multiple consumers
+- ✅ No duplicate work delivery
+- ✅ Work redelivery on failure (NAK)
+- ✅ Move to DLQ after max attempts
+- ✅ Agent failover (offline → new agent picks up)
+- ✅ Track agents with different capabilities
+- ✅ Load balancing across workers
+- ✅ Priority-based work (application level)
+
 ### Planned Tests
 
 **Target Management:**
@@ -63,17 +74,6 @@ NATS_URL=nats://your-server:4222 RUN_INTEGRATION=true pnpm test
 - Verify target state
 - Unassign agent
 - Deregister target
-
-**Failure Scenarios:**
-- Agent dies without deregistering (GC cleanup)
-- Work fails after max attempts (DLQ)
-- DLQ retry moves back to queue
-- Work timeout handling
-
-**Multi-Agent:**
-- Competing consumers for same work
-- Agent failover during work execution
-- Spin-up deduplication under load
 
 ## CI Integration
 
