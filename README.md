@@ -238,9 +238,10 @@ shuttle targets add \
 | `@loom/shared` | Shared types and NATS utilities |
 | `@loom/weft` | Coordinator service |
 | `@loom/shuttle` | Command-line interface |
-| `@loom/copilot-bridge` | NATS bridge for Copilot CLI |
 
 ## Agent Wrappers
+
+Both Claude Code and GitHub Copilot CLI connect to Loom via Warp (MCP server). Bootstrap scripts handle agent registration and work queue subscription.
 
 ### Claude Code
 
@@ -255,14 +256,16 @@ AGENT_CAPABILITIES=typescript,python \
 
 ### Copilot CLI
 
-Use the copilot-bridge to connect Copilot CLI to Weft:
+Use the bootstrap script to start a Copilot CLI agent:
 
 ```bash
-cd agent-wrappers/copilot-bridge
 NATS_URL=nats://localhost:4222 \
 PROJECT_ID=my-project \
-pnpm start
+AGENT_CAPABILITIES=typescript,python \
+./agent-wrappers/copilot-cli/bootstrap.sh
 ```
+
+> **Note**: Copilot CLI requires MCP support (preview feature). Ensure Warp is configured as an MCP server in your Copilot CLI settings.
 
 ## Configuration
 
@@ -355,7 +358,7 @@ coordinator-system/
 ├── shuttle/                # @loom/shuttle - CLI tool
 ├── agent-wrappers/
 │   ├── claude-code/        # Claude Code bootstrap scripts
-│   └── copilot-bridge/     # Copilot CLI NATS bridge
+│   └── copilot-cli/        # Copilot CLI bootstrap scripts
 ├── docker-compose.yml
 └── README.md
 ```

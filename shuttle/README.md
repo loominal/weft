@@ -174,7 +174,7 @@ shuttle targets add \
   --name local-copilot \
   --type copilot-cli \
   --mechanism local \
-  --command "copilot-bridge start" \
+  --command "./agent-wrappers/copilot-cli/bootstrap.sh" \
   --capabilities general \
   --classifications corporate,corporate-adjacent
 
@@ -270,7 +270,7 @@ shuttle targets add \
   --name work-copilot \
   --type copilot-cli \
   --mechanism local \
-  --command "copilot-bridge" \
+  --command "./agent-wrappers/copilot-cli/bootstrap.sh" \
   --capabilities typescript,python \
   --classifications corporate,corporate-adjacent
 

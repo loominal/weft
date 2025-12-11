@@ -39,28 +39,6 @@ services:
       - ${HOME}/.ssh:/root/.ssh:ro
     restart: unless-stopped
 
-  # Copilot Bridge (optional - for local copilot agent)
-  copilot-bridge:
-    build:
-      context: .
-      dockerfile: Dockerfile.copilot-bridge
-    environment:
-      - NATS_URL=nats://nats:4222
-      - LOOM_PROJECT_ID=${LOOM_PROJECT_ID:-default}
-      - AGENT_HANDLE=copilot-local
-      - AGENT_CAPABILITIES=typescript,javascript
-      - AGENT_CLASSIFICATIONS=personal,open-source
-      - REGISTER_TARGET=true
-      - TARGET_NAME=local-copilot
-    depends_on:
-      nats:
-        condition: service_healthy
-      weft:
-        condition: service_started
-    profiles:
-      - with-copilot  # Only start with: docker-compose --profile with-copilot up
-    restart: unless-stopped
-
 volumes:
   nats-data:
 
