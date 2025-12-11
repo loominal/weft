@@ -273,7 +273,9 @@ AGENT_CAPABILITIES=typescript,python \
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NATS_URL` | NATS server URL | `nats://localhost:4222` |
+| `NATS_URL` | NATS server URL (supports credentials in URL) | `nats://localhost:4222` |
+| `NATS_USER` | Username for NATS authentication (fallback if not in URL) | (none) |
+| `NATS_PASS` | Password for NATS authentication (fallback if not in URL) | (none) |
 | `LOOM_PROJECT_ID` | Project ID for isolation | `default` |
 | `API_PORT` | REST API port | `3000` |
 | `API_HOST` | REST API host | `0.0.0.0` |
@@ -285,6 +287,26 @@ AGENT_CAPABILITIES=typescript,python \
 - Automatic reconnection enabled with unlimited attempts
 - Fixed 2-second delay between reconnection attempts
 - Connection state changes are logged for monitoring
+
+### NATS Authentication
+
+Authentication is **optional**. For local development, just use `nats://localhost:4222`.
+
+For production NATS servers with authentication enabled:
+
+**Option 1: Credentials in URL (recommended)**
+```bash
+NATS_URL=nats://admin:mypassword@nats.example.com:4222
+```
+
+**Option 2: Separate environment variables**
+```bash
+NATS_URL=nats://nats.example.com:4222
+NATS_USER=admin
+NATS_PASS=mypassword
+```
+
+URL credentials take precedence over environment variables. Special characters in passwords should be URL-encoded (e.g., `@` → `%40`, `/` → `%2F`).
 
 ### Shuttle Configuration
 

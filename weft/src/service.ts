@@ -15,12 +15,12 @@
  * - REST API (with /api/projects/:projectId routes)
  */
 
-import type { NatsConnection } from 'nats';
+import type { NatsConnection, ConnectionOptions } from 'nats';
 import { connect as natsConnect } from 'nats';
 import { v4 as uuidv4 } from 'uuid';
 import type { Server } from 'http';
 import type { CoordinatorConfiguration } from '@loom/shared';
-import { DEFAULT_COORDINATOR_CONFIG } from '@loom/shared';
+import { DEFAULT_COORDINATOR_CONFIG, parseNatsUrl } from '@loom/shared';
 
 // Component imports
 import { ProjectManager, type ProjectContext } from './projects/index.js';
@@ -732,20 +732,38 @@ export async function startService(): Promise<void> {
 
   // Load configuration
   const config = loadConfig();
+  // Parse URL early to avoid logging credentials
+  const parsedUrl = parseNatsUrl(config.nats.url);
   console.log(`  Default Project ID: ${config.projectId}`);
-  console.log(`  NATS URL: ${config.nats.url}`);
+  console.log(`  NATS URL: ${parsedUrl.server}`);
   console.log(`  API Port: ${config.api.port}`);
 
   try {
-    // Connect to NATS
+    // Connect to NATS with optional authentication
     console.log('Connecting to NATS...');
-    const nc = await natsConnect({
-      servers: config.nats.url,
+
+    // Use already parsed URL, add env var fallbacks
+    const urlUser = parsedUrl.user ?? process.env['NATS_USER'];
+    const urlPass = parsedUrl.pass ?? process.env['NATS_PASS'];
+
+    const connectOpts: ConnectionOptions = {
+      servers: parsedUrl.server,
       name: 'loom-weft-multitenant',
       maxReconnectAttempts: -1,
       reconnectTimeWait: 2000,
-    });
-    console.log('  Connected to NATS');
+    };
+
+    // Add credentials if available
+    if (urlUser) {
+      connectOpts.user = urlUser;
+      if (urlPass) {
+        connectOpts.pass = urlPass;
+      }
+    }
+
+    const hasAuth = !!urlUser;
+    const nc = await natsConnect(connectOpts);
+    console.log(`  Connected to NATS (authenticated: ${hasAuth})`);
 
     // Initialize Project Manager
     console.log('Initializing Project Manager...');
