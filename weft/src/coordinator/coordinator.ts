@@ -128,6 +128,15 @@ export class ExtendedCoordinator extends EventEmitter {
   }
 
   /**
+   * List all registered agents without capability filtering
+   * Used for /api/agents endpoint when no capability filter is specified
+   */
+  async listAllAgents(): Promise<RegisteredAgent[]> {
+    const allEntries = await listRegistryEntries();
+    return allEntries.map(entry => toRegisteredAgent(entry));
+  }
+
+  /**
    * Find workers for a capability with classification filtering
    */
   async findWorkers(

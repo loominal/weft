@@ -102,7 +102,11 @@ function createProjectServiceLayer(
   return {
     // Agent operations
     async listAgents(filter) {
-      const workers = await coordinator.findWorkers(filter?.capability || 'general');
+      // If capability filter specified, use findWorkers. Otherwise list all agents.
+      const workers = filter?.capability
+        ? await coordinator.findWorkers(filter.capability)
+        : await coordinator.listAllAgents();
+
       return workers.filter(a => {
         if (filter?.agentType && a.agentType !== filter.agentType) return false;
         if (filter?.status && a.status !== filter.status) return false;
@@ -111,7 +115,7 @@ function createProjectServiceLayer(
     },
 
     async getAgent(guid) {
-      const workers = await coordinator.findWorkers('general');
+      const workers = await coordinator.listAllAgents();
       return workers.find(w => w.guid === guid) || null;
     },
 

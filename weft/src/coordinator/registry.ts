@@ -48,8 +48,9 @@ export interface Requester {
   username?: string;
 }
 
-// Module-level KV reference (set by initialize)
+// Module-level references (set by initialize)
 let registryKV: KV | null = null;
+let natsConnection: NatsConnection | null = null;
 let bucketName = 'agent-registry';
 
 /**
@@ -59,6 +60,8 @@ export async function initializeRegistry(
   nc: NatsConnection,
   _projectId: string // Kept for API compatibility; bucket is shared across all projects
 ): Promise<void> {
+  // Store the NATS connection for creating fresh bucket views
+  natsConnection = nc;
   const js = nc.jetstream();
   // Must match Warp's bucket name: DEFAULT_BUCKET_NAME = 'agent-registry' in warp/src/kv.ts
   bucketName = 'agent-registry';
@@ -83,25 +86,44 @@ export function getRegistryKV(): KV | null {
 
 /**
  * List all registry entries
+ *
+ * NOTE: We use watch() instead of keys() because keys() can return stale results
+ * from cached bucket instances. Watch() provides a reliable way to enumerate
+ * all current entries.
  */
 export async function listRegistryEntries(): Promise<RegistryEntry[]> {
-  if (!registryKV) {
+  if (!natsConnection) {
     return [];
   }
 
-  const entries: RegistryEntry[] = [];
-  const keys = await registryKV.keys();
+  // Get a FRESH bucket view each time
+  const js = natsConnection.jetstream();
+  const bucket = await js.views.kv(bucketName);
 
-  for await (const key of keys) {
-    try {
-      const entry = await registryKV.get(key);
-      if (entry?.value) {
-        const data = JSON.parse(new TextDecoder().decode(entry.value)) as RegistryEntry;
-        entries.push(data);
+  const entries: RegistryEntry[] = [];
+
+  // Use watch() to reliably get all entries
+  // ignoreDeletes: true means we only get PUT operations (current values)
+  const watcher = await bucket.watch({ ignoreDeletes: true });
+
+  try {
+    for await (const entry of watcher) {
+      if (entry.value) {
+        try {
+          const data = JSON.parse(new TextDecoder().decode(entry.value)) as RegistryEntry;
+          entries.push(data);
+        } catch {
+          // Skip invalid entries
+        }
       }
-    } catch {
-      // Skip invalid entries
+
+      // delta === 0 means no more pending entries (we've caught up)
+      if (entry.delta === 0) {
+        break;
+      }
     }
+  } finally {
+    watcher.stop();
   }
 
   return entries;
