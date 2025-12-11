@@ -4,9 +4,9 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import type { WorkSubmitRequest, WorkSubmitResponse, Priority } from '@loom/shared';
+import type { Priority } from '@loom/shared';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import { output, success, error, info, formatKeyValue } from '../utils/output.js';
 import { promptWorkSubmission } from '../utils/prompts.js';
 import { getGlobalOptions } from '../cli.js';
@@ -93,40 +93,25 @@ export function submitCommand(): Command {
           }
         }
 
-        // Build work request
-        const request: WorkSubmitRequest = {
-          taskId: randomUUID(),
-          boundary: workDetails.boundary as any,
-          capability: workDetails.capability,
+        if (!globalOpts.quiet) {
+          spinner.start('Submitting work...');
+        }
+
+        const client = createAPIClient(config);
+        const response = await client.submitWork({
           description: workDetails.description,
+          boundary: workDetails.boundary,
+          capability: workDetails.capability,
           priority: workDetails.priority,
-          requiredAgentType: options.agentType,
+          taskId: randomUUID(),
           deadline: options.deadline,
-        };
+        });
 
-        // Connect to NATS and submit
-        if (!globalOpts.quiet) {
-          spinner.start('Connecting to coordinator...');
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
-
-        if (!globalOpts.quiet) {
-          spinner.text = 'Submitting work...';
-        }
-
-        const response = await nc.request(
-          subjects.workSubmit(),
-          JSON.stringify(request),
-          { timeout: 5000 }
-        );
-
-        const result: WorkSubmitResponse = JSON.parse(
-          new TextDecoder().decode(response.data)
-        );
-
-        await closeNATSConnection();
+        const result = response.data;
 
         if (!globalOpts.quiet) {
           spinner.succeed('Work submitted successfully');
@@ -140,8 +125,8 @@ export function submitCommand(): Command {
           console.log();
           console.log(
             formatKeyValue({
-              'Work Item ID': result.workItemId,
-              'Target Agent Type': result.targetAgentType,
+              'Work Item ID': result.workItemId || result.id,
+              'Target Agent Type': result.targetAgentType || 'Any',
               'Spin-up Triggered': result.spinUpTriggered ? 'Yes' : 'No',
               'Estimated Wait':
                 result.estimatedWaitSeconds !== undefined
@@ -150,7 +135,7 @@ export function submitCommand(): Command {
             })
           );
           console.log();
-          info(`Track progress with: coord watch ${result.workItemId}`, globalOpts);
+          info(`Track progress with: shuttle work show ${result.workItemId || result.id}`, globalOpts);
         }
       } catch (err: any) {
         if (spinner.isSpinning) {

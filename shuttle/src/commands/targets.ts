@@ -6,7 +6,7 @@ import { Command } from 'commander';
 import ora from 'ora';
 import type { SpinUpMechanism, AgentType, Boundary } from '@loom/shared';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import {
   output,
   success,
@@ -27,7 +27,7 @@ export function targetsCommand(): Command {
     .description('Manage spin-up targets')
     .addCommand(targetsListCommand())
     .addCommand(targetsAddCommand())
-    .addCommand(targetsGetCommand())
+    .addCommand(targetsShowCommand())
     .addCommand(targetsUpdateCommand())
     .addCommand(targetsRemoveCommand())
     .addCommand(targetsTestCommand())
@@ -61,32 +61,28 @@ function targetsListCommand(): Command {
           spinner.start('Fetching targets...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.listTargets({
+          type: options.type,
+          status: options.status,
+          capability: options.capability,
+        });
 
-        const response = await nc.request(
-          subjects.targetsList(),
-          JSON.stringify({
-            agentType: options.type,
-            status: options.status,
-            capability: options.capability,
-            includeDisabled: options.includeDisabled,
-          }),
-          { timeout: 5000 }
-        );
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        const targets = JSON.parse(new TextDecoder().decode(response.data));
-        await closeNATSConnection();
+        const targets = response.data?.targets || [];
 
         if (!globalOpts.quiet) {
-          spinner.succeed(`Found ${targets.length} targets`);
+          spinner.succeed(`Found ${targets.length} target(s)`);
         }
 
         if (globalOpts.json) {
-          output(targets, globalOpts);
+          output({ targets }, globalOpts);
         } else {
           if (targets.length === 0) {
-            output('No targets found.', globalOpts);
+            console.log('No targets found');
             return;
           }
 
@@ -97,7 +93,7 @@ function targetsListCommand(): Command {
               colorAgentType(t.agentType),
               t.mechanism,
               colorStatus(t.status),
-              colorStatus(t.healthStatus),
+              colorStatus(t.healthStatus || 'unknown'),
               truncate(t.capabilities?.join(', ') || '', 25),
               t.useCount || 0,
             ])
@@ -145,7 +141,9 @@ function targetsAddCommand(): Command {
         });
 
         // Build mechanism config based on type
-        let mechanismConfig: Record<string, any> = {};
+        let mechanismConfig: Record<string, any> = {
+          mechanism: options.mechanism, // Required to match top-level mechanism
+        };
         switch (options.mechanism as SpinUpMechanism) {
           case 'ssh':
             if (!options.host) {
@@ -153,6 +151,7 @@ function targetsAddCommand(): Command {
               process.exit(1);
             }
             mechanismConfig = {
+              ...mechanismConfig,
               host: options.host,
               user: options.user || 'root',
               command: options.command,
@@ -164,6 +163,7 @@ function targetsAddCommand(): Command {
               process.exit(1);
             }
             mechanismConfig = {
+              ...mechanismConfig,
               repo: options.repo,
               workflowFile: options.workflow,
             };
@@ -174,6 +174,7 @@ function targetsAddCommand(): Command {
               process.exit(1);
             }
             mechanismConfig = {
+              ...mechanismConfig,
               command: options.command,
             };
             break;
@@ -183,45 +184,41 @@ function targetsAddCommand(): Command {
               process.exit(1);
             }
             mechanismConfig = {
+              ...mechanismConfig,
               url: options.url,
             };
             break;
         }
 
-        const request = {
-          name: options.name,
-          description: options.description,
-          agentType: options.type as AgentType,
-          mechanism: options.mechanism as SpinUpMechanism,
-          config: mechanismConfig,
-          capabilities: options.capabilities?.split(',').map((s: string) => s.trim()) || [],
-          boundaries: options.boundaries?.split(',').map((s: string) => s.trim()) as Boundary[] || undefined,
-        };
-
         if (!globalOpts.quiet) {
-          spinner.start('Registering target...');
+          spinner.start('Creating target...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.createTarget({
+          name: options.name,
+          agentType: options.type as AgentType,
+          capabilities: options.capabilities?.split(',').map((s: string) => s.trim()) || [],
+          mechanism: options.mechanism as SpinUpMechanism,
+          config: mechanismConfig,
+          boundaries: options.boundaries?.split(',').map((s: string) => s.trim()) as Boundary[] || undefined,
+          description: options.description,
+        });
 
-        const response = await nc.request(
-          subjects.targetsRegister(),
-          JSON.stringify(request),
-          { timeout: 5000 }
-        );
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        const target = JSON.parse(new TextDecoder().decode(response.data));
-        await closeNATSConnection();
+        const target = response.data;
 
         if (!globalOpts.quiet) {
-          spinner.succeed('Target registered');
+          spinner.succeed('Target created');
         }
 
         if (globalOpts.json) {
           output(target, globalOpts);
         } else {
-          success(`Target "${target.name}" registered successfully`, globalOpts);
+          success(`Target "${target.name}" created successfully`, globalOpts);
           console.log(
             formatKeyValue({
               'ID': target.id,
@@ -234,7 +231,7 @@ function targetsAddCommand(): Command {
         }
       } catch (err: any) {
         if (spinner.isSpinning) {
-          spinner.fail('Failed to register target');
+          spinner.fail('Failed to create target');
         }
         error(`Error: ${err.message}`, {});
         process.exit(1);
@@ -244,11 +241,11 @@ function targetsAddCommand(): Command {
   return cmd;
 }
 
-function targetsGetCommand(): Command {
-  const cmd = new Command('get');
+function targetsShowCommand(): Command {
+  const cmd = new Command('show');
 
   cmd
-    .description('Get target details')
+    .description('Show target details')
     .argument('<target>', 'Target name or ID')
     .action(async (target: string, _options, command) => {
       const globalOpts = getGlobalOptions(command);
@@ -264,28 +261,48 @@ function targetsGetCommand(): Command {
           spinner.start('Fetching target...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.getTarget(target);
 
-        const response = await nc.request(
-          subjects.targetsGet(),
-          JSON.stringify({ target }),
-          { timeout: 5000 }
-        );
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error(`Target not found: ${target}`);
+          }
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        const result = JSON.parse(new TextDecoder().decode(response.data));
-        await closeNATSConnection();
+        const result = response.data;
 
         if (!globalOpts.quiet) {
-          spinner.succeed('Target retrieved');
+          spinner.succeed('Target found');
         }
 
-        if (!result) {
-          error(`Target not found: ${target}`, globalOpts);
-          process.exit(1);
-        }
+        if (globalOpts.json) {
+          output(result, globalOpts);
+        } else {
+          console.log('\nTarget Details:');
+          console.log(
+            formatKeyValue({
+              'ID': result.id,
+              'Name': result.name,
+              'Description': result.description || 'N/A',
+              'Type': colorAgentType(result.agentType),
+              'Mechanism': result.mechanism,
+              'Status': colorStatus(result.status),
+              'Health': colorStatus(result.healthStatus || 'unknown'),
+              'Capabilities': result.capabilities?.join(', ') || 'None',
+              'Boundaries': result.boundaries?.join(', ') || 'All',
+              'Use Count': result.useCount || 0,
+              'Last Used': result.lastUsedAt || 'Never',
+              'Created': result.createdAt,
+            })
+          );
 
-        output(result, globalOpts);
+          if (result.config) {
+            console.log('\nConfiguration:');
+            console.log(formatKeyValue(result.config));
+          }
+        }
       } catch (err: any) {
         if (spinner.isSpinning) {
           spinner.fail('Failed to fetch target');
@@ -337,24 +354,19 @@ function targetsUpdateCommand(): Command {
           spinner.start('Updating target...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.updateTarget(target, updates);
 
-        const response = await nc.request(
-          subjects.targetsUpdate(),
-          JSON.stringify({ target, updates }),
-          { timeout: 5000 }
-        );
-
-        const result = JSON.parse(new TextDecoder().decode(response.data));
-        await closeNATSConnection();
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
         if (!globalOpts.quiet) {
           spinner.succeed('Target updated');
         }
 
         if (globalOpts.json) {
-          output(result, globalOpts);
+          output(response.data, globalOpts);
         } else {
           success(`Target "${target}" updated`, globalOpts);
         }
@@ -391,7 +403,7 @@ function targetsRemoveCommand(): Command {
         if (!options.yes && !globalOpts.json) {
           const confirmed = await confirm(`Remove target "${target}"?`);
           if (!confirmed) {
-            output('Cancelled.', globalOpts);
+            console.log('Cancelled.');
             return;
           }
         }
@@ -400,16 +412,12 @@ function targetsRemoveCommand(): Command {
           spinner.start('Removing target...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.deleteTarget(target);
 
-        await nc.request(
-          subjects.targetsRemove(),
-          JSON.stringify({ target }),
-          { timeout: 5000 }
-        );
-
-        await closeNATSConnection();
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
         if (!globalOpts.quiet) {
           spinner.succeed('Target removed');
@@ -448,17 +456,14 @@ function targetsTestCommand(): Command {
           spinner.start('Testing target...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.testTarget(target);
 
-        const response = await nc.request(
-          subjects.targetsTest(),
-          JSON.stringify({ target }),
-          { timeout: 30000 }
-        );
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        const result = JSON.parse(new TextDecoder().decode(response.data));
-        await closeNATSConnection();
+        const result = response.data;
 
         if (!globalOpts.quiet) {
           if (result.healthy) {
@@ -512,16 +517,12 @@ function targetsEnableCommand(): Command {
           spinner.start('Enabling target...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.enableTarget(target);
 
-        await nc.request(
-          subjects.targetsEnable(),
-          JSON.stringify({ target }),
-          { timeout: 5000 }
-        );
-
-        await closeNATSConnection();
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
         if (!globalOpts.quiet) {
           spinner.succeed('Target enabled');
@@ -560,16 +561,12 @@ function targetsDisableCommand(): Command {
           spinner.start('Disabling target...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.disableTarget(target);
 
-        await nc.request(
-          subjects.targetsDisable(),
-          JSON.stringify({ target }),
-          { timeout: 5000 }
-        );
-
-        await closeNATSConnection();
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
         if (!globalOpts.quiet) {
           spinner.succeed('Target disabled');

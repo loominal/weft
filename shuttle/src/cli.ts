@@ -63,18 +63,21 @@ export function createCLI(): Command {
 }
 
 /**
- * Get global options from the parent command
+ * Get global options from the root command
+ * Traverses up the command chain to find the root program
  */
 export function getGlobalOptions(command: Command): GlobalOptions {
-  const parent = command.parent;
-  if (!parent) {
-    return {};
+  // Find root command by traversing parents
+  let root = command;
+  while (root.parent) {
+    root = root.parent;
   }
 
+  const opts = root.opts();
   return {
-    json: parent.opts().json,
-    config: parent.opts().config,
-    quiet: parent.opts().quiet,
-    project: parent.opts().project,
+    json: opts.json,
+    config: opts.config,
+    quiet: opts.quiet,
+    project: opts.project,
   };
 }

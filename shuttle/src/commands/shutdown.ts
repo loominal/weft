@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import type { AgentShutdownRequest } from '@loom/shared';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import { output, success, error, warning } from '../utils/output.js';
 import { confirm } from '../utils/prompts.js';
 import { getGlobalOptions } from '../cli.js';
@@ -47,25 +46,16 @@ export function shutdownCommand(): Command {
           spinner.start('Sending shutdown request...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const graceful = options.force ? false : options.graceful !== false;
 
-        const shutdownRequest: AgentShutdownRequest = {
-          guid: agentGuid,
-          reason: 'manual',
-          graceful: options.force ? false : options.graceful !== false,
-          gracePeriodMs: parseInt(options.gracePeriod, 10),
-        };
+        const response = await client.shutdownAgent(agentGuid, graceful);
 
-        const response = await nc.request(
-          subjects.agentShutdown(),
-          JSON.stringify(shutdownRequest),
-          { timeout: 5000 }
-        );
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        const result = JSON.parse(new TextDecoder().decode(response.data));
-
-        await closeNATSConnection();
+        const result = response.data;
 
         if (!globalOpts.quiet) {
           spinner.succeed('Shutdown request sent');
@@ -75,18 +65,17 @@ export function shutdownCommand(): Command {
         if (globalOpts.json) {
           output(result, globalOpts);
         } else {
-          if (result.success !== false) {
+          if (result?.success !== false) {
             success('Agent shutdown requested', globalOpts);
-            if (shutdownRequest.graceful) {
+            if (graceful) {
+              const gracePeriodMs = parseInt(options.gracePeriod, 10);
               warning(
-                `Agent will shutdown after completing current work (max ${
-                  shutdownRequest.gracePeriodMs! / 1000
-                }s)`,
+                `Agent will shutdown after completing current work (max ${gracePeriodMs / 1000}s)`,
                 globalOpts
               );
             }
           } else {
-            error(`Shutdown failed: ${result.error || 'Unknown error'}`, globalOpts);
+            error(`Shutdown failed: ${result?.message || 'Unknown error'}`, globalOpts);
             process.exit(1);
           }
         }

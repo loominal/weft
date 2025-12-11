@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import type { CoordinatedWorkItem } from '@loom/shared';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import {
   output,
   error,
@@ -26,6 +25,13 @@ export function workCommand(): Command {
   cmd
     .description('List and view work items')
     .option('--status <status>', 'Filter by status (pending|assigned|in-progress|completed|failed|cancelled)')
+    .option('--boundary <name>', 'Filter by boundary')
+    .action(workListAction);
+
+  cmd
+    .command('list')
+    .description('List work items')
+    .option('--status <status>', 'Filter by status')
     .option('--boundary <name>', 'Filter by boundary')
     .action(workListAction);
 
@@ -58,25 +64,17 @@ async function workListAction(options: any, command: Command) {
       spinner.start('Fetching work items...');
     }
 
-    const nc = await getNATSConnection(config);
-    const subjects = new CoordinatorSubjects(config.projectId);
+    const client = createAPIClient(config);
+    const response = await client.listWork({
+      status: options.status,
+      classification: options.boundary,
+    });
 
-    // Build filter
-    const filter: any = {};
-    if (options.status) filter.status = options.status;
-    if (options.boundary) filter.boundary = options.boundary;
+    if (!response.ok) {
+      throw new Error(response.error || `HTTP ${response.status}`);
+    }
 
-    const response = await nc.request(
-      subjects.workList(),
-      JSON.stringify(filter),
-      { timeout: 5000 }
-    );
-
-    const workItems: CoordinatedWorkItem[] = JSON.parse(
-      new TextDecoder().decode(response.data)
-    );
-
-    await closeNATSConnection();
+    const workItems = response.data?.workItems || [];
 
     if (!globalOpts.quiet) {
       spinner.succeed(`Found ${workItems.length} work item(s)`);
@@ -84,7 +82,7 @@ async function workListAction(options: any, command: Command) {
 
     // Output results
     if (globalOpts.json) {
-      output(workItems, globalOpts);
+      output({ workItems }, globalOpts);
     } else {
       if (workItems.length === 0) {
         console.log('No work items found');
@@ -92,14 +90,14 @@ async function workListAction(options: any, command: Command) {
       }
 
       const table = createTable(
-        ['ID', 'Status', 'Classification', 'Capability', 'Description', 'Priority', 'Offered'],
-        workItems.map((item) => [
+        ['ID', 'Status', 'Boundary', 'Capability', 'Description', 'Priority', 'Offered'],
+        workItems.map((item: any) => [
           truncate(item.id, 12),
           colorStatus(item.status),
           colorBoundary(item.boundary),
           item.capability,
           truncate(item.description, 40),
-          item.priority.toString(),
+          String(item.priority || 5),
           formatTimestamp(item.offeredAt),
         ])
       );
@@ -129,20 +127,14 @@ async function workShowAction(workId: string, _options: any, command: Command) {
       spinner.start('Fetching work item...');
     }
 
-    const nc = await getNATSConnection(config);
-    const subjects = new CoordinatorSubjects(config.projectId);
+    const client = createAPIClient(config);
+    const response = await client.getWork(workId);
 
-    const response = await nc.request(
-      subjects.workStatus(workId),
-      JSON.stringify({}),
-      { timeout: 5000 }
-    );
+    if (!response.ok) {
+      throw new Error(response.error || `HTTP ${response.status}`);
+    }
 
-    const workItem: CoordinatedWorkItem = JSON.parse(
-      new TextDecoder().decode(response.data)
-    );
-
-    await closeNATSConnection();
+    const workItem = response.data;
 
     if (!globalOpts.quiet) {
       spinner.succeed('Work item found');
@@ -158,7 +150,7 @@ async function workShowAction(workId: string, _options: any, command: Command) {
           'ID': workItem.id,
           'Task ID': workItem.taskId,
           'Status': colorStatus(workItem.status),
-          'Classification': colorBoundary(workItem.boundary),
+          'Boundary': colorBoundary(workItem.boundary),
           'Capability': workItem.capability,
           'Description': workItem.description,
           'Priority': workItem.priority,
@@ -220,18 +212,12 @@ async function workCancelAction(workId: string, _options: any, command: Command)
       spinner.start('Cancelling work item...');
     }
 
-    const nc = await getNATSConnection(config);
-    const subjects = new CoordinatorSubjects(config.projectId);
+    const client = createAPIClient(config);
+    const response = await client.cancelWork(workId);
 
-    const response = await nc.request(
-      subjects.workCancel(),
-      JSON.stringify({ id: workId }),
-      { timeout: 5000 }
-    );
-
-    const result = JSON.parse(new TextDecoder().decode(response.data));
-
-    await closeNATSConnection();
+    if (!response.ok) {
+      throw new Error(response.error || `HTTP ${response.status}`);
+    }
 
     if (!globalOpts.quiet) {
       spinner.succeed('Work item cancelled');
@@ -239,7 +225,7 @@ async function workCancelAction(workId: string, _options: any, command: Command)
 
     // Output results
     if (globalOpts.json) {
-      output(result, globalOpts);
+      output(response.data, globalOpts);
     } else {
       success(`Work item ${workId} cancelled`, globalOpts);
     }

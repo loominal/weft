@@ -5,7 +5,7 @@
 import { Command } from 'commander';
 import ora from 'ora';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import { output, success, error, info, formatKeyValue } from '../utils/output.js';
 import { getGlobalOptions } from '../cli.js';
 
@@ -38,9 +38,7 @@ export function spinUpCommand(): Command {
           spinner.start('Triggering agent spin-up...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
-
+        const client = createAPIClient(config);
         let targetId: string;
 
         if (options.target) {
@@ -48,42 +46,38 @@ export function spinUpCommand(): Command {
           targetId = options.target;
         } else {
           // Query for target based on filters
-          const filter: any = {};
-          if (options.type) filter.agentType = options.type;
-          if (options.capability) filter.capability = options.capability;
-          if (options.boundary) filter.boundary = options.boundary;
+          const listResponse = await client.listTargets({
+            type: options.type,
+            capability: options.capability,
+          });
 
-          const queryResponse = await nc.request(
-            subjects.targetsList(),
-            JSON.stringify(filter),
-            { timeout: 5000 }
-          );
+          if (!listResponse.ok) {
+            throw new Error(listResponse.error || `HTTP ${listResponse.status}`);
+          }
 
-          const targets = JSON.parse(new TextDecoder().decode(queryResponse.data));
+          const targets = listResponse.data?.targets || [];
 
           if (targets.length === 0) {
+            if (!globalOpts.quiet && spinner.isSpinning) {
+              spinner.fail('No matching targets found');
+            }
             error('No matching targets found', globalOpts);
-            await closeNATSConnection();
             process.exit(1);
           }
 
           // Use first available target
-          targetId = targets[0].id;
+          targetId = targets[0].id || targets[0].name;
           info(`Selected target: ${targets[0].name}`, globalOpts);
         }
 
         // Trigger spin-up
-        const response = await nc.request(
-          subjects.spinUpTrigger(),
-          JSON.stringify({ target: targetId }),
-          { timeout: 30000 } // Longer timeout for spin-up
-        );
+        const response = await client.spinUpTarget(targetId);
 
-        const result = JSON.parse(
-          new TextDecoder().decode(response.data)
-        );
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        await closeNATSConnection();
+        const result = response.data;
 
         // Handle both old format (success boolean) and new format (status string)
         const isSuccess = result.success === true ||

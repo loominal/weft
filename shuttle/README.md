@@ -25,12 +25,12 @@ pnpm link --global
 
 ```bash
 # Configure
-shuttle config set nats-url nats://localhost:4222
-shuttle config set project-id my-project
+shuttle config set apiUrl http://localhost:3000
+shuttle config set projectId my-project
 
 # Submit work
 shuttle submit "Implement new feature" \
-  --classification personal \
+  --boundary personal \
   --capability typescript
 
 # Watch progress
@@ -57,13 +57,12 @@ shuttle config path                # Show config file path
 
 | Key | Description | Default | Env Variable |
 |-----|-------------|---------|--------------|
-| `natsUrl` | NATS server URL | `nats://localhost:4222` | `NATS_URL` |
+| `apiUrl` | Weft coordinator API URL | `http://localhost:3000` | `LOOM_API_URL` |
+| `apiToken` | API auth token (optional) | - | `LOOM_API_TOKEN` |
 | `projectId` | Project ID for isolation | `default` | `PROJECT_ID` |
-| `defaultClassification` | Default work classification | - | - |
+| `defaultBoundary` | Default work boundary | - | - |
 | `defaultPriority` | Default priority (1-10) | `5` | - |
 | `outputFormat` | Output format (`table`/`json`) | `table` | - |
-| `apiUrl` | Weft API URL (optional) | - | `LOOM_API_URL` |
-| `apiToken` | API auth token (optional) | - | `LOOM_API_TOKEN` |
 
 ## Global Options
 
@@ -97,7 +96,7 @@ shuttle submit "Fix bug" --classification corporate --capability typescript
 
 | Option | Description |
 |--------|-------------|
-| `--classification <type>` | `corporate`, `corporate-adjacent`, `personal`, `open-source` |
+| `--boundary <name>` | Work boundary (user-defined, e.g., `personal`, `corporate`) |
 | `--capability <name>` | Required capability (e.g., `typescript`, `python`) |
 | `--priority <n>` | Priority 1-10 (default: 5) |
 | `--agent-type <type>` | `copilot-cli` or `claude-code` |
@@ -232,7 +231,7 @@ Displays:
 
 ```bash
 # 1. Configure
-shuttle config set natsUrl nats://localhost:4222
+shuttle config set apiUrl http://localhost:3000
 shuttle config set projectId my-project
 
 # 2. Add a target
@@ -302,14 +301,14 @@ shuttle work show <work-id> --json
 ### Connection Issues
 
 ```bash
-# Test NATS connection
+# Test API connection
 shuttle stats
 
 # Check configuration
 shuttle config list
 
 # Override with env var
-NATS_URL=nats://other-server:4222 shuttle agents list
+LOOM_API_URL=http://other-server:3000 shuttle agents list
 ```
 
 ### Target Issues
@@ -351,10 +350,10 @@ pnpm lint             # Lint
 
 ## Architecture
 
-Shuttle connects directly to NATS and communicates with Weft using request-reply patterns:
+Shuttle communicates with the Weft coordinator via REST API:
 
 - **Configuration** — `~/.loom/config.json`
-- **NATS Subjects** — `coord.<projectId>.<resource>.<action>`
+- **API Communication** — HTTP REST calls to Weft coordinator
 - **Output** — Tables via `cli-table3` or JSON
 - **Interactive** — Prompts via `inquirer`
 - **Progress** — Spinners via `ora`

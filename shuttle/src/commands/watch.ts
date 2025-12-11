@@ -4,9 +4,8 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import type { CoordinatedWorkItem } from '@loom/shared';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import { output, error, info, colorStatus } from '../utils/output.js';
 import { getGlobalOptions } from '../cli.js';
 
@@ -34,21 +33,18 @@ export function watchCommand(): Command {
           console.log();
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
 
         // Poll for updates
         const poll = async () => {
           try {
-            const response = await nc.request(
-              subjects.workStatus(workId),
-              JSON.stringify({}),
-              { timeout: 5000 }
-            );
+            const response = await client.getWork(workId);
 
-            const workItem: CoordinatedWorkItem = JSON.parse(
-              new TextDecoder().decode(response.data)
-            );
+            if (!response.ok) {
+              throw new Error(response.error || `HTTP ${response.status}`);
+            }
+
+            const workItem = response.data;
 
             // Check if status changed
             if (workItem.status !== lastStatus) {
@@ -66,18 +62,15 @@ export function watchCommand(): Command {
                   if (workItem.result?.summary) {
                     console.log(`Summary: ${workItem.result.summary}`);
                   }
-                  await closeNATSConnection();
                   process.exit(0);
                 } else if (workItem.status === 'failed') {
                   spinner.fail('Work failed');
                   if (workItem.error?.message) {
                     error(`Error: ${workItem.error.message}`, globalOpts);
                   }
-                  await closeNATSConnection();
                   process.exit(1);
                 } else if (workItem.status === 'cancelled') {
                   spinner.warn('Work was cancelled');
-                  await closeNATSConnection();
                   process.exit(0);
                 } else {
                   if (!spinner.isSpinning) {

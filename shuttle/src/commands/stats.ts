@@ -5,20 +5,9 @@
 import { Command } from 'commander';
 import ora from 'ora';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import { output, error, formatKeyValue, colorStatus } from '../utils/output.js';
 import { getGlobalOptions } from '../cli.js';
-
-/**
- * Stats returned by the coordinator
- */
-interface CoordinatorStats {
-  pending: number;
-  active: number;
-  completed: number;
-  failed: number;
-  total: number;
-}
 
 export function statsCommand(): Command {
   const cmd = new Command('stats');
@@ -39,20 +28,14 @@ export function statsCommand(): Command {
           spinner.start('Fetching statistics...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.getStats();
 
-        const response = await nc.request(
-          subjects.stats(),
-          JSON.stringify({}),
-          { timeout: 5000 }
-        );
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        const stats: CoordinatorStats = JSON.parse(
-          new TextDecoder().decode(response.data)
-        );
-
-        await closeNATSConnection();
+        const stats = response.data;
 
         if (!globalOpts.quiet) {
           spinner.succeed('Statistics retrieved');
@@ -69,11 +52,11 @@ export function statsCommand(): Command {
           console.log('\nWork Items:');
           console.log(
             formatKeyValue({
-              'Pending': colorStatus('pending') + ` (${stats.pending})`,
-              'Active': colorStatus('in-progress') + ` (${stats.active})`,
-              'Completed': colorStatus('completed') + ` (${stats.completed})`,
-              'Failed': colorStatus('failed') + ` (${stats.failed})`,
-              'Total': stats.total,
+              'Pending': colorStatus('pending') + ` (${stats.pending || 0})`,
+              'Active': colorStatus('in-progress') + ` (${stats.active || 0})`,
+              'Completed': colorStatus('completed') + ` (${stats.completed || 0})`,
+              'Failed': colorStatus('failed') + ` (${stats.failed || 0})`,
+              'Total': stats.total || 0,
             })
           );
 

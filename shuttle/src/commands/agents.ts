@@ -4,16 +4,14 @@
 
 import { Command } from 'commander';
 import ora from 'ora';
-import type { RegisteredAgent } from '@loom/shared';
 import { loadConfig } from '../utils/config-file.js';
-import { getNATSConnection, closeNATSConnection, CoordinatorSubjects } from '../nats/client.js';
+import { createAPIClient } from '../api/client.js';
 import {
   output,
   error,
   createTable,
   colorStatus,
   colorAgentType,
-  formatTimestamp,
   truncate,
 } from '../utils/output.js';
 import { getGlobalOptions } from '../cli.js';
@@ -40,26 +38,18 @@ export function agentsCommand(): Command {
           spinner.start('Fetching agents...');
         }
 
-        const nc = await getNATSConnection(config);
-        const subjects = new CoordinatorSubjects(config.projectId);
+        const client = createAPIClient(config);
+        const response = await client.listAgents({
+          type: options.type,
+          status: options.status,
+          capability: options.capability,
+        });
 
-        // Build filter
-        const filter: any = {};
-        if (options.type) filter.agentType = options.type;
-        if (options.status) filter.status = options.status;
-        if (options.capability) filter.capability = options.capability;
+        if (!response.ok) {
+          throw new Error(response.error || `HTTP ${response.status}`);
+        }
 
-        const response = await nc.request(
-          subjects.agentsList(),
-          JSON.stringify(filter),
-          { timeout: 5000 }
-        );
-
-        const agents: RegisteredAgent[] = JSON.parse(
-          new TextDecoder().decode(response.data)
-        );
-
-        await closeNATSConnection();
+        const agents = response.data?.agents || [];
 
         if (!globalOpts.quiet) {
           spinner.succeed(`Found ${agents.length} agent(s)`);
@@ -67,7 +57,7 @@ export function agentsCommand(): Command {
 
         // Output results
         if (globalOpts.json) {
-          output(agents, globalOpts);
+          output({ agents }, globalOpts);
         } else {
           if (agents.length === 0) {
             console.log('No agents found');
@@ -75,14 +65,14 @@ export function agentsCommand(): Command {
           }
 
           const table = createTable(
-            ['GUID', 'Type', 'Status', 'Capabilities', 'Tasks', 'Last Activity'],
-            agents.map((agent) => [
+            ['GUID', 'Handle', 'Type', 'Status', 'Capabilities', 'Tasks'],
+            agents.map((agent: any) => [
               truncate(agent.guid, 12),
+              agent.handle || '-',
               colorAgentType(agent.agentType),
               colorStatus(agent.status),
-              truncate(agent.capabilities.join(', '), 30),
-              `${agent.currentTaskCount}/${agent.maxConcurrentTasks}`,
-              formatTimestamp(agent.lastActivity),
+              truncate((agent.capabilities || []).join(', '), 30),
+              `${agent.currentTaskCount || 0}`,
             ])
           );
 
