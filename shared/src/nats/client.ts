@@ -101,12 +101,15 @@ export async function createNATSClient(config: NATSConfiguration): Promise<Conne
     if (urlPass) {
       connectOpts.pass = urlPass;
     }
-  } else if (config.credentials) {
-    // Fall back to credentials file if no URL/env auth
-    connectOpts.credsFile = config.credentials;
   }
 
-  const nc = await connect(connectOpts);
+  // Build final options, adding credsFile via spread to bypass type check
+  // (credsFile is a valid runtime option but not in ConnectionOptions type)
+  const finalOpts = config.credentials && !urlUser
+    ? { ...connectOpts, credsFile: config.credentials }
+    : connectOpts;
+
+  const nc = await connect(finalOpts);
 
   const js = nc.jetstream();
   const jsm = await nc.jetstreamManager();
