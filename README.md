@@ -273,6 +273,7 @@ pnpm start
 | `LOOM_PROJECT_ID` | Project ID for isolation | `default` |
 | `API_PORT` | REST API port | `3000` |
 | `API_HOST` | REST API host | `0.0.0.0` |
+| `API_TOKENS` | Comma-separated bearer tokens for API authentication | (none) |
 | `IDLE_TIMEOUT_MS` | Idle detection timeout | `300000` |
 | `LOG_LEVEL` | Logging level | `info` |
 
