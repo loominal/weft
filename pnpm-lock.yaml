@@ -69,9 +69,6 @@ importers:
       inquirer:
         specifier: ^9.2.0
         version: 9.3.8(@types/node@20.19.25)
-      nats:
-        specifier: ^2.28.0
-        version: 2.29.3
       ora:
         specifier: ^8.0.0
         version: 8.2.0
