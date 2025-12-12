@@ -8,7 +8,7 @@
  * Build a namespaced subject
  */
 export function buildSubject(projectId: string, ...parts: string[]): string {
-  return `loom.${projectId}.${parts.join('.')}`;
+  return `loominal.${projectId}.${parts.join('.')}`;
 }
 
 /**
@@ -17,28 +17,28 @@ export function buildSubject(projectId: string, ...parts: string[]): string {
 export const WorkSubjects = {
   /**
    * Work queue for a specific capability
-   * Pattern: loom.{projectId}.work.queue.{capability}
+   * Pattern: loominal.{projectId}.work.queue.{capability}
    */
   queue: (projectId: string, capability: string) =>
     buildSubject(projectId, 'work', 'queue', capability),
 
   /**
    * Work status updates
-   * Pattern: loom.{projectId}.work.status.{workItemId}
+   * Pattern: loominal.{projectId}.work.status.{workItemId}
    */
   status: (projectId: string, workItemId: string) =>
     buildSubject(projectId, 'work', 'status', workItemId),
 
   /**
    * Work completion notifications
-   * Pattern: loom.{projectId}.work.completed
+   * Pattern: loominal.{projectId}.work.completed
    */
   completed: (projectId: string) =>
     buildSubject(projectId, 'work', 'completed'),
 
   /**
    * Work error notifications
-   * Pattern: loom.{projectId}.work.errors
+   * Pattern: loominal.{projectId}.work.errors
    */
   errors: (projectId: string) =>
     buildSubject(projectId, 'work', 'errors'),
@@ -50,35 +50,35 @@ export const WorkSubjects = {
 export const AgentSubjects = {
   /**
    * Agent inbox for direct messages
-   * Pattern: loom.{projectId}.agent.inbox.{guid}
+   * Pattern: loominal.{projectId}.agent.inbox.{guid}
    */
   inbox: (projectId: string, guid: string) =>
     buildSubject(projectId, 'agent', 'inbox', guid),
 
   /**
    * Agent registration announcements
-   * Pattern: loom.{projectId}.agent.register
+   * Pattern: loominal.{projectId}.agent.register
    */
   register: (projectId: string) =>
     buildSubject(projectId, 'agent', 'register'),
 
   /**
    * Agent deregistration announcements
-   * Pattern: loom.{projectId}.agent.deregister
+   * Pattern: loominal.{projectId}.agent.deregister
    */
   deregister: (projectId: string) =>
     buildSubject(projectId, 'agent', 'deregister'),
 
   /**
    * Agent heartbeat
-   * Pattern: loom.{projectId}.agent.heartbeat.{guid}
+   * Pattern: loominal.{projectId}.agent.heartbeat.{guid}
    */
   heartbeat: (projectId: string, guid: string) =>
     buildSubject(projectId, 'agent', 'heartbeat', guid),
 
   /**
    * Agent shutdown request
-   * Pattern: loom.{projectId}.agent.shutdown.{guid}
+   * Pattern: loominal.{projectId}.agent.shutdown.{guid}
    */
   shutdown: (projectId: string, guid: string) =>
     buildSubject(projectId, 'agent', 'shutdown', guid),
@@ -90,28 +90,28 @@ export const AgentSubjects = {
 export const CoordinatorSubjects = {
   /**
    * Commands to coordinator
-   * Pattern: loom.{projectId}.coordinator.command
+   * Pattern: loominal.{projectId}.coordinator.command
    */
   command: (projectId: string) =>
     buildSubject(projectId, 'coordinator', 'command'),
 
   /**
    * Coordinator status broadcasts
-   * Pattern: loom.{projectId}.coordinator.status
+   * Pattern: loominal.{projectId}.coordinator.status
    */
   status: (projectId: string) =>
     buildSubject(projectId, 'coordinator', 'status'),
 
   /**
    * Spin-up requests
-   * Pattern: loom.{projectId}.coordinator.spin-up.request
+   * Pattern: loominal.{projectId}.coordinator.spin-up.request
    */
   spinUpRequest: (projectId: string) =>
     buildSubject(projectId, 'coordinator', 'spin-up', 'request'),
 
   /**
    * Spin-up status updates
-   * Pattern: loom.{projectId}.coordinator.spin-up.status
+   * Pattern: loominal.{projectId}.coordinator.spin-up.status
    */
   spinUpStatus: (projectId: string) =>
     buildSubject(projectId, 'coordinator', 'spin-up', 'status'),
@@ -124,17 +124,17 @@ export const StreamNames = {
   /**
    * Work queue stream
    */
-  workQueue: (projectId: string) => `LOOM_WORK_${projectId}`,
+  workQueue: (projectId: string) => `LOOMINAL_WORK_${projectId}`,
 
   /**
    * Agent registry stream
    */
-  agentRegistry: (projectId: string) => `LOOM_AGENTS_${projectId}`,
+  agentRegistry: (projectId: string) => `LOOMINAL_AGENTS_${projectId}`,
 
   /**
    * Dead letter queue stream
    */
-  deadLetter: (projectId: string) => `LOOM_DLQ_${projectId}`,
+  deadLetter: (projectId: string) => `LOOMINAL_DLQ_${projectId}`,
 };
 
 /**
@@ -143,28 +143,28 @@ export const StreamNames = {
 export const TargetSubjects = {
   /**
    * Target registration announcements
-   * Pattern: loom.{projectId}.targets.register
+   * Pattern: loominal.{projectId}.targets.register
    */
   register: (projectId: string) =>
     buildSubject(projectId, 'targets', 'register'),
 
   /**
    * Target update announcements
-   * Pattern: loom.{projectId}.targets.update
+   * Pattern: loominal.{projectId}.targets.update
    */
   update: (projectId: string) =>
     buildSubject(projectId, 'targets', 'update'),
 
   /**
    * Target removal announcements
-   * Pattern: loom.{projectId}.targets.remove
+   * Pattern: loominal.{projectId}.targets.remove
    */
   remove: (projectId: string) =>
     buildSubject(projectId, 'targets', 'remove'),
 
   /**
    * Target health check results
-   * Pattern: loom.{projectId}.targets.health.{targetId}
+   * Pattern: loominal.{projectId}.targets.health.{targetId}
    */
   health: (projectId: string, targetId: string) =>
     buildSubject(projectId, 'targets', 'health', targetId),
@@ -177,20 +177,20 @@ export const KVBuckets = {
   /**
    * Agent registry KV bucket
    */
-  agentRegistry: (projectId: string) => `loom-agents-${projectId}`,
+  agentRegistry: (projectId: string) => `loominal-agents-${projectId}`,
 
   /**
    * Work item state KV bucket
    */
-  workState: (projectId: string) => `loom-work-${projectId}`,
+  workState: (projectId: string) => `loominal-work-${projectId}`,
 
   /**
    * Spin-up target registry KV bucket
    */
-  targetRegistry: (projectId: string) => `loom-targets-${projectId}`,
+  targetRegistry: (projectId: string) => `loominal-targets-${projectId}`,
 
   /**
    * Configuration KV bucket
    */
-  config: (projectId: string) => `loom-config-${projectId}`,
+  config: (projectId: string) => `loominal-config-${projectId}`,
 };

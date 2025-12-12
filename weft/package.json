@@ -1,7 +1,7 @@
 {
-  "name": "@loom/weft",
+  "name": "@loominal/weft",
   "version": "0.1.5",
-  "description": "Weft - Coordinator service for Loom multi-agent infrastructure",
+  "description": "Weft - Coordinator service for Loominal multi-agent infrastructure",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
@@ -19,7 +19,7 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
-    "@loom/shared": "workspace:*",
+    "@loominal/shared": "workspace:*",
     "nats": "^2.28.0",
     "nats.ws": "^1.29.2",
     "ws": "^8.18.0",

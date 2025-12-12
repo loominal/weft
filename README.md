@@ -1,14 +1,14 @@
 # Weft
 
-**Intelligent coordination for Loom.**
+**Intelligent coordination for Loominal.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
-[![Beta](https://img.shields.io/badge/Status-Beta-blue.svg)](https://github.com/mdlopresti/loom-weft/releases)
+[![Beta](https://img.shields.io/badge/Status-Beta-blue.svg)](https://github.com/loominal/weft/releases)
 
-This package contains the orchestration layer for [Loom](https://github.com/mdlopresti/loom) — the coordinator service that weaves work through your agent fabric.
+This package contains the orchestration layer for [Loominal](https://github.com/loominal/loominal) — the coordinator service that weaves work through your agent fabric.
 
-> **Note**: The Shuttle CLI has been moved to its own repository: **[loom-shuttle](https://github.com/mdlopresti/loom-shuttle)**
+> **Note**: The Shuttle CLI has been moved to its own repository: **[shuttle](https://github.com/loominal/shuttle)**
 
 > **🔷 Beta Software**: This project has passed integration testing and is suitable for early adopters. While core functionality is stable, some features may still change. Feedback and contributions are welcome!
 
@@ -19,7 +19,7 @@ This package contains the orchestration layer for [Loom](https://github.com/mdlo
 | Component | Purpose | Repository |
 |-----------|---------|------------|
 | **Weft** | Coordinator service — routes work, manages agent lifecycle, handles scaling | This repo |
-| **Shuttle** | CLI tool — submit work, manage agents, monitor your fleet | [loom-shuttle](https://github.com/mdlopresti/loom-shuttle) |
+| **Shuttle** | CLI tool — submit work, manage agents, monitor your fleet | [shuttle](https://github.com/loominal/shuttle) |
 
 Together they enable:
 - **Work routing** based on data classification (corporate vs personal)
@@ -92,7 +92,7 @@ docker run -d --name nats -p 4222:4222 nats:latest -js
 docker run -d --name weft \
   -p 3000:3000 \
   -e NATS_URL=nats://host.docker.internal:4222 \
-  ghcr.io/mdlopresti/loom-weft:latest
+  ghcr.io/loominal/weft:latest
 ```
 
 ### 2. Verify Weft is Running
@@ -104,10 +104,10 @@ curl http://localhost:3000/health
 
 ### 3. Use Shuttle CLI (Optional)
 
-Install the [Shuttle CLI](https://github.com/mdlopresti/loom-shuttle) for fleet management:
+Install the [Shuttle CLI](https://github.com/loominal/shuttle) for fleet management:
 
 ```bash
-npm install -g @loom/shuttle
+npm install -g @loominal/shuttle
 shuttle config set nats-url nats://localhost:4222
 shuttle agents list
 ```
@@ -122,7 +122,7 @@ Weft supports multiple projects in a single deployment. Projects are auto-discov
 
 ## Shuttle CLI
 
-For CLI documentation, see **[loom-shuttle](https://github.com/mdlopresti/loom-shuttle)**.
+For CLI documentation, see **[shuttle](https://github.com/loominal/shuttle)**.
 
 ## Spin-Up Mechanisms
 
@@ -165,12 +165,12 @@ shuttle targets add \
 
 | Package | Description |
 |---------|-------------|
-| `@loom/shared` | Shared types and NATS utilities |
-| `@loom/weft` | Coordinator service |
+| `@loominal/shared` | Shared types and NATS utilities |
+| `@loominal/weft` | Coordinator service |
 
 ## Agent Wrappers
 
-Both Claude Code and GitHub Copilot CLI connect to Loom via Warp (MCP server). Bootstrap scripts handle agent registration and work queue subscription.
+Both Claude Code and GitHub Copilot CLI connect to Loominal via Warp (MCP server). Bootstrap scripts handle agent registration and work queue subscription.
 
 ### Claude Code
 
@@ -205,7 +205,7 @@ AGENT_CAPABILITIES=typescript,python \
 | `NATS_URL` | NATS server URL (supports credentials in URL) | `nats://localhost:4222` |
 | `NATS_USER` | Username for NATS authentication (fallback if not in URL) | (none) |
 | `NATS_PASS` | Password for NATS authentication (fallback if not in URL) | (none) |
-| `LOOM_PROJECT_ID` | Project ID for isolation | `default` |
+| `LOOMINAL_PROJECT_ID` | Project ID for isolation | `default` |
 | `API_PORT` | REST API port | `3000` |
 | `API_HOST` | REST API host | `0.0.0.0` |
 | `API_TOKENS` | Comma-separated bearer tokens for API authentication | (none) |
@@ -255,7 +255,7 @@ The transport is auto-detected from the URL scheme:
 
 ### Shuttle Configuration
 
-Stored in `~/.loom/config.json`:
+Stored in `~/.loominal/config.json`:
 
 ```json
 {
@@ -321,9 +321,9 @@ pnpm typecheck
 ### Project Structure
 
 ```
-loom-weft/
-├── shared/                 # @loom/shared - Types and utilities
-├── weft/                   # @loom/weft - Coordinator service
+weft/
+├── shared/                 # @loominal/shared - Types and utilities
+├── weft/                   # @loominal/weft - Coordinator service
 ├── agent-wrappers/
 │   ├── claude-code/        # Claude Code bootstrap scripts
 │   └── copilot-cli/        # Copilot CLI bootstrap scripts
@@ -373,7 +373,7 @@ This is **beta software** ready for early adopters. Known limitations include:
 - No automatic target health checking (manual test only)
 
 ### Agent Management
-- Idle detection relies on work completion events (agents may stay running if busy with non-Loom work)
+- Idle detection relies on work completion events (agents may stay running if busy with non-Loominal work)
 - No graceful shutdown coordination for in-progress work during Weft restart
 - SSH-based spin-up assumes agents can reach NATS (no NAT traversal)
 
@@ -383,14 +383,14 @@ This is **beta software** ready for early adopters. Known limitations include:
 - Local spin-up mechanism assumes Unix-like shell environment
 
 ### Roadmap
-We're actively working on addressing these limitations. See the main [Loom README](https://github.com/mdlopresti/loom) for the project roadmap.
+We're actively working on addressing these limitations. See the main [Loominal README](https://github.com/loominal/loominal) for the project roadmap.
 
 ## Related
 
-- [Loom](https://github.com/mdlopresti/loom) — Multi-agent infrastructure
-- [Warp](https://github.com/mdlopresti/loom-warp) — MCP server for messaging
-- [Pattern](https://github.com/mdlopresti/loom-pattern) — Agent memory
-- [Shuttle](https://github.com/mdlopresti/loom-shuttle) — Fleet management CLI
+- [Loominal](https://github.com/loominal/loominal) — Multi-agent infrastructure
+- [Warp](https://github.com/loominal/warp) — MCP server for messaging
+- [Pattern](https://github.com/loominal/pattern) — Agent memory
+- [Shuttle](https://github.com/loominal/shuttle) — Fleet management CLI
 
 ## License
 

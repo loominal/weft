@@ -28,7 +28,7 @@ services:
       - "3000:3000"
     environment:
       - NATS_URL=nats://nats:4222
-      - LOOM_PROJECT_ID=${LOOM_PROJECT_ID:-default}
+      - LOOMINAL_PROJECT_ID=${LOOMINAL_PROJECT_ID:-default}
       - API_PORT=3000
       - LOG_LEVEL=info
     depends_on:
@@ -44,4 +44,4 @@ volumes:
 
 networks:
   default:
-    name: loom-network
+    name: loominal-network

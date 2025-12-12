@@ -98,9 +98,9 @@ function buildJobManifest(
   const envVars: Array<{ name: string; value: string }> = [];
 
   // Add target info as env vars
-  envVars.push({ name: 'LOOM_TARGET_ID', value: target.id });
-  envVars.push({ name: 'LOOM_TARGET_NAME', value: target.name });
-  envVars.push({ name: 'LOOM_AGENT_TYPE', value: target.agentType });
+  envVars.push({ name: 'LOOMINAL_TARGET_ID', value: target.id });
+  envVars.push({ name: 'LOOMINAL_TARGET_NAME', value: target.name });
+  envVars.push({ name: 'LOOMINAL_AGENT_TYPE', value: target.agentType });
 
   // Add user-specified env vars
   if (config.env) {

@@ -52,9 +52,9 @@ function loadConfig(): CoordinatorConfiguration {
     config.nats.url = process.env.NATS_URL;
   }
 
-  // LOOM_PROJECT_ID now becomes the default project (optional)
-  if (process.env.LOOM_PROJECT_ID) {
-    config.projectId = process.env.LOOM_PROJECT_ID;
+  // LOOMINAL_PROJECT_ID now becomes the default project (optional)
+  if (process.env.LOOMINAL_PROJECT_ID) {
+    config.projectId = process.env.LOOMINAL_PROJECT_ID;
   }
 
   if (process.env.API_PORT) {

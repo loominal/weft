@@ -1,8 +1,8 @@
 {
-  "name": "@loom/monorepo",
+  "name": "@loominal/monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Weft - Coordination layer for Loom multi-agent infrastructure",
+  "description": "Weft - Coordination layer for Loominal multi-agent infrastructure",
   "author": "Michael LoPresti <mike@lopresti.org>",
   "license": "MIT",
   "scripts": {
