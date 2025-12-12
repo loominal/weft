@@ -6,7 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 [![Beta](https://img.shields.io/badge/Status-Beta-blue.svg)](https://github.com/mdlopresti/loom-weft/releases)
 
-This package contains the orchestration layer for [Loom](../README.md) — the coordinator service that weaves work through your agent fabric.
+This package contains the orchestration layer for [Loom](https://github.com/mdlopresti/loom) — the coordinator service that weaves work through your agent fabric.
 
 > **Note**: The Shuttle CLI has been moved to its own repository: **[loom-shuttle](https://github.com/mdlopresti/loom-shuttle)**
 
@@ -79,7 +79,6 @@ flowchart TB
 **Option A: Docker Compose (easiest)**
 
 ```bash
-cd weft
 docker-compose up -d
 ```
 
@@ -89,110 +88,41 @@ docker-compose up -d
 # Start NATS
 docker run -d --name nats -p 4222:4222 nats:latest -js
 
-# Start Weft (Multi-Tenant)
-# Note: LOOM_PROJECT_ID is now optional - Weft auto-discovers projects
+# Start Weft
 docker run -d --name weft \
   -p 3000:3000 \
   -e NATS_URL=nats://host.docker.internal:4222 \
   ghcr.io/mdlopresti/loom-weft:latest
 ```
 
+### 2. Verify Weft is Running
+
+```bash
+curl http://localhost:3000/health
+# {"status":"ok"}
+```
+
+### 3. Use Shuttle CLI (Optional)
+
+Install the [Shuttle CLI](https://github.com/mdlopresti/loom-shuttle) for fleet management:
+
+```bash
+npm install -g @loom/shuttle
+shuttle config set nats-url nats://localhost:4222
+shuttle agents list
+```
+
 ## Multi-Tenant Architecture
 
-Weft now supports multiple projects in a single deployment. Projects are auto-discovered when agents or clients first connect.
-
-### How It Works
+Weft supports multiple projects in a single deployment. Projects are auto-discovered when agents or clients first connect.
 
 - Single Weft instance handles all projects via NATS wildcard subscriptions (`coord.*.*`)
 - Each project gets isolated: coordinator, target registry, idle tracker
 - Global stats endpoint shows aggregate metrics across all projects
 
-### Shuttle Multi-Project Usage
+## Shuttle CLI
 
-```bash
-# List all active projects
-shuttle projects
-
-# Operate on a specific project (overrides config)
-shuttle --project my-app agents
-shuttle --project other-app work list
-shuttle -p my-app stats
-
-# Configure default project
-shuttle config set projectId my-default-project
-```
-
-### 2. Install Shuttle
-
-Shuttle is now in its own repository. See **[loom-shuttle](https://github.com/mdlopresti/loom-shuttle)** for installation instructions.
-
-```bash
-npm install -g @loom/shuttle
-```
-
-### 3. Configure Shuttle
-
-```bash
-shuttle config set nats-url nats://localhost:4222
-shuttle config set project-id my-project
-```
-
-### 4. Register a Spin-Up Target
-
-```bash
-# Register your home server as a Claude Code agent target
-shuttle targets add \
-  --name home-claude \
-  --type claude-code \
-  --mechanism ssh \
-  --host home.example.com \
-  --user mike \
-  --command "/path/to/bootstrap.sh" \
-  --capabilities typescript,python \
-  --classifications personal,open-source
-```
-
-### 5. Submit Work
-
-```bash
-# Submit work (will spin up an agent if needed)
-shuttle submit "Refactor the authentication module" \
-  --classification personal \
-  --capability typescript \
-  --priority 7
-```
-
-### 6. Monitor
-
-```bash
-# Watch work progress
-shuttle watch <work-id>
-
-# List agents
-shuttle agents list
-
-# List targets
-shuttle targets list
-
-# View stats
-shuttle stats
-```
-
-## Shuttle Commands
-
-For full Shuttle CLI documentation, see **[loom-shuttle](https://github.com/mdlopresti/loom-shuttle)**.
-
-| Command | Description |
-|---------|-------------|
-| `shuttle submit <task>` | Submit work to the coordinator |
-| `shuttle agents list` | List registered agents |
-| `shuttle work list` | List work items |
-| `shuttle watch <id>` | Watch work progress in real-time |
-| `shuttle targets list` | List spin-up targets |
-| `shuttle stats` | View coordinator statistics |
-| `shuttle config` | Manage CLI configuration |
-| `shuttle channels list` | List available channels |
-| `shuttle channels read <channel>` | Read messages from a channel |
+For CLI documentation, see **[loom-shuttle](https://github.com/mdlopresti/loom-shuttle)**.
 
 ## Spin-Up Mechanisms
 
@@ -237,7 +167,6 @@ shuttle targets add \
 |---------|-------------|
 | `@loom/shared` | Shared types and NATS utilities |
 | `@loom/weft` | Coordinator service |
-| `@loom/shuttle` | Command-line interface |
 
 ## Agent Wrappers
 
@@ -392,10 +321,9 @@ pnpm typecheck
 ### Project Structure
 
 ```
-coordinator-system/
+loom-weft/
 ├── shared/                 # @loom/shared - Types and utilities
 ├── weft/                   # @loom/weft - Coordinator service
-├── shuttle/                # @loom/shuttle - CLI tool
 ├── agent-wrappers/
 │   ├── claude-code/        # Claude Code bootstrap scripts
 │   └── copilot-cli/        # Copilot CLI bootstrap scripts
@@ -455,12 +383,14 @@ This is **beta software** ready for early adopters. Known limitations include:
 - Local spin-up mechanism assumes Unix-like shell environment
 
 ### Roadmap
-We're actively working on addressing these limitations. See the main [Loom README](../README.md) for the project roadmap.
+We're actively working on addressing these limitations. See the main [Loom README](https://github.com/mdlopresti/loom) for the project roadmap.
 
-## Related Components
+## Related
 
-- **[Loom](../README.md)** — The complete multi-agent infrastructure
-- **[Warp](../warp/README.md)** — MCP server for agent messaging
+- [Loom](https://github.com/mdlopresti/loom) — Multi-agent infrastructure
+- [Warp](https://github.com/mdlopresti/loom-warp) — MCP server for messaging
+- [Pattern](https://github.com/mdlopresti/loom-pattern) — Agent memory
+- [Shuttle](https://github.com/mdlopresti/loom-shuttle) — Fleet management CLI
 
 ## License
 
