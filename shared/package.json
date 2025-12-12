@@ -2,6 +2,11 @@
   "name": "@loom/shared",
   "version": "0.1.0",
   "description": "Shared types and utilities for Loom multi-agent infrastructure",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mdlopresti/loom-weft.git",
+    "directory": "shared"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
