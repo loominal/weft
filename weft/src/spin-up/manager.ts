@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { v4 as uuidv4 } from 'uuid';
-import type { SpinUpTarget, SpinUpResult } from '@loom/shared';
+import type { SpinUpTarget, SpinUpResult } from '@loominal/shared';
 import type { TrackedSpinUp } from './types.js';
 import { sshSpinUp } from './mechanisms/ssh.js';
 import { githubActionsSpinUp } from './mechanisms/github-actions.js';

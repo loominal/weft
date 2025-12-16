@@ -1,4 +1,4 @@
-import type { SpinUpTarget, SpinUpResult } from '@loom/shared';
+import type { SpinUpTarget, SpinUpResult } from '@loominal/shared';
 
 /**
  * Spin-up request with optional work item context

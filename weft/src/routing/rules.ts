@@ -5,7 +5,7 @@
  * This module provides helpers for creating and managing boundary configurations.
  */
 
-import type { BoundaryConfig, Boundary, AgentType } from '@loom/shared';
+import type { BoundaryConfig, Boundary, AgentType } from '@loominal/shared';
 
 /**
  * Create a boundary configuration

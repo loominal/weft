@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import type { SpinUpTarget, SpinUpResult, SSHMechanismConfig } from '@loom/shared';
+import type { SpinUpTarget, SpinUpResult, SSHMechanismConfig } from '@loominal/shared';
 
 /**
  * Spin up an agent using SSH

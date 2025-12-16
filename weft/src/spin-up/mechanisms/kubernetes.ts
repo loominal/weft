@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import type { SpinUpTarget, SpinUpResult, KubernetesMechanismConfig } from '@loom/shared';
+import type { SpinUpTarget, SpinUpResult, KubernetesMechanismConfig } from '@loominal/shared';
 import { randomUUID } from 'node:crypto';
 
 /**

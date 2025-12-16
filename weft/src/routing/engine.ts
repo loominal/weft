@@ -13,7 +13,7 @@ import type {
   BoundaryConfig,
   AgentType,
   RegisteredAgent,
-} from '@loom/shared';
+} from '@loominal/shared';
 
 export interface RoutingEngineConfig {
   /** Optional boundary-specific configurations */

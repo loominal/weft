@@ -1,6 +1,6 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
-import type { APIConfiguration } from '@loom/shared';
+import type { APIConfiguration } from '@loominal/shared';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 

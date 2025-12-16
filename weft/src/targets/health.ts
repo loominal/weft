@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import type { SpinUpTarget, HealthCheckResult } from '@loom/shared';
+import type { SpinUpTarget, HealthCheckResult } from '@loominal/shared';
 import type { TargetRegistry } from './registry.js';
 
 /**

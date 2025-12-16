@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { WorkSubmitRequest } from '@loom/shared';
+import type { WorkSubmitRequest } from '@loominal/shared';
 import type { CoordinatorServiceLayer } from '../server.js';
 import { APIError } from '../middleware/error.js';
 import { v4 as uuidv4 } from 'uuid';

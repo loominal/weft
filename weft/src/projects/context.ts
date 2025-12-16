@@ -7,7 +7,7 @@
  */
 
 import type { NatsConnection } from 'nats';
-import type { CoordinatorConfiguration } from '@loom/shared';
+import type { CoordinatorConfiguration } from '@loominal/shared';
 import { ExtendedCoordinator, type ExtendedCoordinatorConfig, initializeRegistry } from '../coordinator/index.js';
 import { TargetRegistry, HealthCheckRunner } from '../targets/index.js';
 import { SpinUpManager } from '../spin-up/index.js';

@@ -1,4 +1,4 @@
-import type { SpinUpTarget, SpinUpResult } from '@loom/shared';
+import type { SpinUpTarget, SpinUpResult } from '@loominal/shared';
 
 /**
  * Spin up an agent using a webhook call

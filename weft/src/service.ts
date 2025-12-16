@@ -21,8 +21,8 @@ import { connect as connectWs } from 'nats.ws';
 import ws from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import type { Server } from 'http';
-import type { CoordinatorConfiguration } from '@loom/shared';
-import { DEFAULT_COORDINATOR_CONFIG, parseNatsUrl } from '@loom/shared';
+import type { CoordinatorConfiguration } from '@loominal/shared';
+import { DEFAULT_COORDINATOR_CONFIG, parseNatsUrl } from '@loominal/shared';
 
 // Component imports
 import { ProjectManager, type ProjectContext } from './projects/index.js';

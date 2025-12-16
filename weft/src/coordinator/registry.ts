@@ -12,7 +12,7 @@ import type {
   Boundary,
   AgentStatus,
   AgentVisibility,
-} from '@loom/shared';
+} from '@loominal/shared';
 
 /**
  * Registry entry as stored in NATS KV

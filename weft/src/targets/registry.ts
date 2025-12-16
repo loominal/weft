@@ -7,8 +7,8 @@ import type {
   TargetQueryFilter,
   TargetStatus,
   HealthStatus,
-} from '@loom/shared';
-import { KVBuckets, TargetSubjects } from '@loom/shared';
+} from '@loominal/shared';
+import { KVBuckets, TargetSubjects } from '@loominal/shared';
 
 /**
  * Dynamic target registry

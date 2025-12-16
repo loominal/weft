@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { RoutingEngine } from '../engine.js';
-import type { RegisteredAgent, Boundary, AgentType } from '@loom/shared';
+import type { RegisteredAgent, Boundary, AgentType } from '@loominal/shared';
 
 describe('RoutingEngine', () => {
   let engine: RoutingEngine;

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { TargetRegisterRequest } from '@loom/shared';
+import type { TargetRegisterRequest } from '@loominal/shared';
 import type { CoordinatorServiceLayer } from '../server.js';
 import { APIError } from '../middleware/error.js';
 

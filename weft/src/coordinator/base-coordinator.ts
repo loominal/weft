@@ -9,7 +9,7 @@ import type {
   CoordinatedWorkItem,
   WorkItemStatus,
   Priority,
-} from '@loom/shared';
+} from '@loominal/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 /**

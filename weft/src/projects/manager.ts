@@ -6,7 +6,7 @@
  */
 
 import type { NatsConnection } from 'nats';
-import type { CoordinatorConfiguration } from '@loom/shared';
+import type { CoordinatorConfiguration } from '@loominal/shared';
 import {
   type ProjectContext,
   createProjectContext,

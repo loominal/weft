@@ -29,39 +29,39 @@ Together they enable:
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph Weft["WEFT (Coordinator)"]
-        direction LR
-        R["Routes work"]
-        T["Target Registry"]
-        S["Spin-up Manager"]
-        I["Idle Tracker"]
-        A["REST API"]
-    end
-
-    subgraph Interfaces["Interfaces"]
-        WARP["WARP<br/>(NATS)"]
-        Registry["Target<br/>Registry"]
-        REST["REST<br/>API"]
-    end
-
-    subgraph Agents["Agents"]
-        CC1["Claude Code<br/>(Home)"]
-        CC2["Claude Code<br/>(Cloud)"]
-        Copilot["Copilot CLI<br/>(Work)"]
-        Shuttle["SHUTTLE<br/>(CLI)"]
-    end
-
-    Weft --> WARP
-    Weft --> Registry
-    Weft --> REST
-
-    WARP <--> CC1
-    WARP <--> CC2
-    WARP <--> Copilot
-    REST <--> Shuttle
 ```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           NATS JetStream                                    │
+│                    Channels • Work Queues • KV Stores                       │
+└───────────────────────────────────┬─────────────────────────────────────────┘
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        │                           │                           │
+        ▼                           ▼                           ▼
+┌───────────────┐          ┌───────────────┐          ┌───────────────┐
+│   Agent 1     │          │   Agent 2     │          │   Agent N     │
+│   + Warp      │          │   + Warp      │          │   + Warp      │
+│   (MCP)       │          │   (MCP)       │          │   (MCP)       │
+└───────────────┘          └───────────────┘          └───────────────┘
+
+                    ┌───────────────────────────┐
+                    │          WEFT             │
+                    │      (Coordinator)        │
+                    ├───────────────────────────┤
+                    │ • Work Routing            │
+                    │ • Target Registry         │
+                    │ • Spin-up Manager         │
+                    │ • Idle Tracker            │
+                    │ • REST API (:3000)        │
+                    └─────────────┬─────────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │        SHUTTLE            │
+                    │         (CLI)             │
+                    └───────────────────────────┘
+```
+
+Weft connects to NATS directly (not through Warp) and coordinates agent lifecycle. Shuttle communicates with Weft via REST API.
 
 ## Work Classification
 

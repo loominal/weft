@@ -14,7 +14,7 @@ import type {
   AgentType,
   RegisteredAgent,
   WorkSubmitResponse,
-} from '@loom/shared';
+} from '@loominal/shared';
 import { BaseCoordinator, type BaseCoordinatorConfig, type WorkRequest } from './base-coordinator.js';
 import {
   listRegistryEntries,

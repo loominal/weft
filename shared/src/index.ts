@@ -1,5 +1,5 @@
 /**
- * @loom/shared - Shared types and utilities for the coordinator system
+ * @loominal/shared - Shared types and utilities for the coordinator system
  *
  * This package provides:
  * - Type definitions for work items, agents, routing, and configuration

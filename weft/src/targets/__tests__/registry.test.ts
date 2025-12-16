@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { connect, type NatsConnection } from 'nats';
 import { TargetRegistry } from '../registry.js';
-import type { TargetRegisterRequest, SpinUpTarget } from '@loom/shared';
+import type { TargetRegisterRequest, SpinUpTarget } from '@loominal/shared';
 
 describe('TargetRegistry', () => {
   let nc: NatsConnection;
