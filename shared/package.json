@@ -1,6 +1,6 @@
 {
   "name": "@loominal/shared",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Shared types and utilities for Loominal multi-agent infrastructure",
   "repository": {
     "type": "git",

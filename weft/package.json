@@ -1,7 +1,14 @@
 {
   "name": "@loominal/weft",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Weft - Coordinator service for Loominal multi-agent infrastructure",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/loominal/weft",
+    "directory": "weft"
+  },
+  "author": "Michael LoPresti <mike@lopresti.org>",
+  "license": "MIT",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
