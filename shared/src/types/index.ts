@@ -1,3 +1,25 @@
+// Scope types (unified scope model)
+export type {
+  LoominalScope,
+  LegacyScope,
+  LegacyVisibility,
+  BucketSelectionContext,
+  BucketSelection,
+} from './scope.js';
+
+export {
+  LOOMINAL_SCOPES,
+  isValidScope,
+  validateScope,
+  getUserBucket,
+  getProjectBucket,
+  getGlobalBucket,
+  selectBucket,
+  migrateLegacyScope,
+  migrateLegacyVisibility,
+  migrateToUnifiedScope,
+} from './scope.js';
+
 // Work item types
 export type {
   Boundary,
