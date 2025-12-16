@@ -1,0 +1,115 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write  # Required for npm OIDC
+  contents: read
+
+jobs:
+  publish-shared:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm for OIDC support
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @loominal/shared build
+
+      - name: Run shared tests
+        run: pnpm --filter @loominal/shared test
+
+      - name: Check if shared version already published
+        id: check-shared
+        working-directory: shared
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if npm view "@loominal/shared@$VERSION" version 2>/dev/null; then
+            echo "already_published=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_published=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish shared to npm
+        if: steps.check-shared.outputs.already_published == 'false'
+        working-directory: shared
+        run: npm publish --provenance --access public
+
+  publish-weft:
+    runs-on: ubuntu-latest
+    needs: publish-shared
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm for OIDC support
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm build
+
+      - name: Run weft tests
+        run: pnpm --filter @loominal/weft test
+
+      - name: Update shared dependency to npm version
+        working-directory: weft
+        run: |
+          # Replace workspace reference with actual npm package
+          SHARED_VERSION=$(node -p "require('../shared/package.json').version")
+          node -e "
+            const pkg = require('./package.json');
+            pkg.dependencies['@loominal/shared'] = '^${SHARED_VERSION}';
+            require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2));
+          "
+
+      - name: Check if weft version already published
+        id: check-weft
+        working-directory: weft
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if npm view "@loominal/weft@$VERSION" version 2>/dev/null; then
+            echo "already_published=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_published=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish weft to npm
+        if: steps.check-weft.outputs.already_published == 'false'
+        working-directory: weft
+        run: npm publish --provenance --access public
