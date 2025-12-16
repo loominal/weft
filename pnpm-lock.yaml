@@ -72,7 +72,7 @@ importers:
 
   weft:
     dependencies:
-      '@loom/shared':
+      '@loominal/shared':
         specifier: workspace:*
         version: link:../shared
       cors:

@@ -36,9 +36,7 @@ jobs:
       - name: Build shared package
         run: pnpm --filter @loominal/shared build
 
-      - name: Run shared tests
-        run: pnpm --filter @loominal/shared test
-
+      # Tests run in CI workflow on push - skip here
       - name: Check if shared version already published
         id: check-shared
         working-directory: shared
@@ -83,9 +81,7 @@ jobs:
       - name: Build all packages
         run: pnpm build
 
-      - name: Run weft tests
-        run: pnpm --filter @loominal/weft test
-
+      # Tests run in CI workflow on push - skip here
       - name: Update shared dependency to npm version
         working-directory: weft
         run: |
