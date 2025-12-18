@@ -16,8 +16,8 @@ COPY weft/ ./weft/
 
 # Install dependencies and build
 RUN pnpm install --frozen-lockfile || pnpm install
-RUN pnpm --filter @loom/shared build
-RUN pnpm --filter @loom/weft build
+RUN pnpm --filter @loominal/shared build
+RUN pnpm --filter @loominal/weft build
 
 # Production image
 FROM node:20-alpine AS runner

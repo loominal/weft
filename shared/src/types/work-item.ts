@@ -151,6 +151,9 @@ export interface WorkSubmitRequest {
  */
 export interface WorkSubmitResponse {
   /** Generated work item ID */
+  id: string;
+
+  /** @deprecated Use `id` instead. Provided for backward compatibility. */
   workItemId: string;
 
   /** Resolved agent type based on routing */
