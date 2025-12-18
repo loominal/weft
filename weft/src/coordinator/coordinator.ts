@@ -287,7 +287,8 @@ export class ExtendedCoordinator extends EventEmitter {
     }
 
     return {
-      workItemId,
+      id: workItemId,
+      workItemId, // Deprecated: for backward compatibility
       targetAgentType,
       spinUpTriggered,
       estimatedWaitSeconds,
