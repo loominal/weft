@@ -48,7 +48,7 @@ jobs:
         run: pnpm build
 
       - name: Run tests (weft)
-        run: pnpm --filter @loom/weft test
+        run: pnpm --filter @loominal/weft test
 
   typecheck:
     runs-on: ubuntu-latest
@@ -121,13 +121,13 @@ jobs:
         with:
           node-version: 20
           registry-url: 'https://npm.pkg.github.com'
-          scope: '@mdlopresti'
+          scope: '@loominal'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build shared package
-        run: pnpm --filter @loom/shared build
+        run: pnpm --filter @loominal/shared build
 
       - name: Prepare package for GitHub Packages
         working-directory: shared
@@ -135,7 +135,7 @@ jobs:
           # Create a copy of package.json with GitHub Packages name
           node -e "
             const pkg = require('./package.json');
-            pkg.name = '@mdlopresti/loom-shared';
+            pkg.name = '@loominal/shared';
             pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
             require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2));
           "
@@ -175,7 +175,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/mdlopresti/loom-weft
+          images: ghcr.io/loominal/weft
           tags: |
             type=ref,event=branch
             type=ref,event=pr
