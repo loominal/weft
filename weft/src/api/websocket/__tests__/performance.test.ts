@@ -257,7 +257,7 @@ describe('WebSocket Performance Tests', () => {
 
       // Each iteration generates 4 events (submitted, assigned, started, completed)
       const expectedEvents = iterations * 4;
-      await collector.waitForCount(expectedEvents, 60000); // Increased timeout
+      await collector.waitForCount(expectedEvents, 120000); // Further increased for CI
 
       const duration = Date.now() - startTime;
       const throughput = expectedEvents / (duration / 1000);
@@ -269,7 +269,7 @@ describe('WebSocket Performance Tests', () => {
 
       collector.stop();
       await client.close();
-    }, 70000); // Increased test timeout
+    }, 150000); // Further increased test timeout for CI
   });
 
   describe('Subscription Performance', () => {

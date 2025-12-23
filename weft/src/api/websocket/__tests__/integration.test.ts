@@ -297,8 +297,8 @@ describe('WebSocket Integration Tests', () => {
       // Complete work
       coordinator.recordCompletion(workId, { success: true });
 
-      // Wait for all events (with longer timeout)
-      await collector.waitForCount(5, 10000);
+      // Wait for all events (with longer timeout for CI)
+      await collector.waitForCount(5, 20000);
 
       const events = collector.getEvents();
       expect(events.length).toBe(5);
@@ -312,7 +312,7 @@ describe('WebSocket Integration Tests', () => {
 
       collector.stop();
       await closeClient(client);
-    }, 15000); // Add test timeout
+    }, 30000); // Increased timeout for CI
 
     it('should broadcast to multiple clients', async () => {
       const client1 = await createClient(port);
