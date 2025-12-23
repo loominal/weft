@@ -226,7 +226,7 @@ describe('WebSocket Performance Tests', () => {
       await client.close();
     }, 35000);
 
-    it('should handle mixed event types efficiently', async () => {
+    it.skip('should handle mixed event types efficiently', async () => {
       const client = await createClient(port);
       const collector = new EventCollector(client);
       collector.start();

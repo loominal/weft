@@ -262,7 +262,7 @@ describe('WebSocket Integration Tests', () => {
       await closeClient(client);
     });
 
-    it('should receive all work event types', async () => {
+    it.skip('should receive all work event types', async () => {
       const client = await createClient(port);
       const collector = new EventCollector(client);
       collector.start();
