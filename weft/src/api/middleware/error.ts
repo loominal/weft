@@ -30,6 +30,8 @@ export class APIError extends Error {
  *
  * Catches all errors thrown in route handlers and converts them
  * to proper JSON error responses with appropriate status codes.
+ *
+ * Handles OpenAPI validation errors with detailed feedback.
  */
 export function errorHandler(
   err: Error | APIError,
@@ -39,6 +41,62 @@ export function errorHandler(
 ): void {
   // Log the error
   console.error('API Error:', err);
+
+  // Handle OpenAPI validation errors
+  if ('status' in err && err.status === 400 && 'errors' in err) {
+    const validationError = err as {
+      status: number;
+      message: string;
+      errors: Array<{
+        path: string;
+        message: string;
+        errorCode?: string;
+      }>;
+    };
+
+    const errorResponse: ErrorResponse = {
+      error: 'ValidationError',
+      message: validationError.message || 'Request validation failed',
+      details: {
+        validationErrors: validationError.errors.map((e) => ({
+          field: e.path,
+          message: e.message,
+          code: e.errorCode,
+        })),
+      },
+    };
+
+    res.status(400).json(errorResponse);
+    return;
+  }
+
+  // Handle response validation errors (500 - this is an implementation bug)
+  if ('status' in err && err.status === 500 && 'errors' in err) {
+    const validationError = err as {
+      status: number;
+      message: string;
+      errors: Array<{
+        path: string;
+        message: string;
+      }>;
+    };
+
+    console.error('CRITICAL: Response validation failed!', validationError.errors);
+
+    const errorResponse: ErrorResponse = {
+      error: 'ResponseValidationError',
+      message: 'Internal server error - response validation failed',
+      details:
+        process.env.NODE_ENV === 'development'
+          ? {
+              responseErrors: validationError.errors,
+            }
+          : undefined,
+    };
+
+    res.status(500).json(errorResponse);
+    return;
+  }
 
   // Determine status code
   const statusCode = err instanceof APIError ? err.statusCode : 500;

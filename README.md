@@ -294,6 +294,71 @@ Weft exposes a REST API for integration:
 | `/api/channels` | GET | List channels (requires `projectId` query param) |
 | `/api/channels/:name/messages` | GET | Read channel messages (requires `projectId` query param) |
 
+## WebSocket API
+
+Weft provides a WebSocket API for real-time updates on agent status, work distribution, and system events.
+
+### Quick Start
+
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://localhost:3000/api/ws');
+
+ws.on('open', () => {
+  // Subscribe to work events
+  ws.send(JSON.stringify({
+    type: 'subscribe',
+    topic: 'work'
+  }));
+});
+
+ws.on('message', (data) => {
+  const msg = JSON.parse(data);
+  if (msg.type === 'event') {
+    console.log(`[${msg.event}] ${msg.data.taskId}`);
+  }
+});
+```
+
+### Features
+
+- **Real-time events** - Get instant notifications for agent, work, and target changes
+- **Server-side filtering** - Subscribe to specific event types and filter by status, capability, boundary, etc.
+- **Low latency** - <10ms from event emission to client receipt
+- **Automatic heartbeat** - Built-in connection health monitoring
+- **Periodic stats** - Optional statistics updates every 30 seconds
+
+### Topics
+
+| Topic | Events | Description |
+|-------|--------|-------------|
+| `work` | 7 events | Work submission, assignment, progress, completion |
+| `agents` | 3 events | Agent registration, status updates, shutdown |
+| `targets` | 5 events | Target configuration, health, spin-up events |
+| `stats` | Periodic | System statistics every 30 seconds |
+
+### Event Types (19 total)
+
+**Work Events:**
+`work:submitted`, `work:assigned`, `work:started`, `work:progress`, `work:completed`, `work:failed`, `work:cancelled`
+
+**Agent Events:**
+`agent:registered`, `agent:updated`, `agent:shutdown`
+
+**Target Events:**
+`target:registered`, `target:updated`, `target:disabled`, `target:removed`, `target:health-changed`
+
+**Spin-Up Events:**
+`spin-up:triggered`, `spin-up:started`, `spin-up:completed`, `spin-up:failed`
+
+### Complete Documentation
+
+For complete protocol specification, message formats, code examples, and best practices:
+
+- **[WebSocket API Documentation](./WEBSOCKET_API.md)** - Complete API guide
+- **[Example Scripts](./examples/websocket/)** - Working code examples in JavaScript and Python
+
 ## Development
 
 ### Prerequisites

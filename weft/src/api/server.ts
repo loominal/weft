@@ -1,8 +1,13 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
-import type { APIConfiguration } from '@loominal/shared';
+import * as OpenApiValidator from 'express-openapi-validator';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import type { Server as HTTPServer } from 'http';
+import type { APIConfiguration, PaginationState } from '@loominal/shared';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
+import { WeftWebSocketServer } from './websocket/index.js';
 
 // Import route handlers (will be created)
 import { createAgentsRouter } from './routes/agents.js';
@@ -10,6 +15,7 @@ import { createWorkRouter } from './routes/work.js';
 import { createStatsRouter } from './routes/stats.js';
 import { createTargetsRouter } from './routes/targets.js';
 import { createChannelsRouter } from './routes/channels.js';
+import { createDocsRouter } from './routes/docs.js';
 
 /**
  * Service layer interface
@@ -23,7 +29,10 @@ export interface CoordinatorServiceLayer {
     agentType?: string;
     status?: string;
     capability?: string;
-  }): Promise<unknown[]>;
+    offset?: number;
+    limit?: number;
+    filterHash?: string;
+  }): Promise<{ agents: unknown[]; total?: number }>;
 
   getAgent(guid: string): Promise<unknown | null>;
 
@@ -33,6 +42,8 @@ export interface CoordinatorServiceLayer {
   listWork(filter?: {
     status?: string;
     boundary?: string;
+    offset?: number;
+    limit?: number;
   }): Promise<unknown[]>;
 
   submitWork(request: unknown): Promise<unknown>;
@@ -63,12 +74,15 @@ export interface CoordinatorServiceLayer {
   }>;
 
   // Target operations
-  listTargets(filter?: {
-    agentType?: string;
-    status?: string;
-    capability?: string;
-    boundary?: string;
-  }): Promise<unknown[]>;
+  listTargets(
+    filter?: {
+      agentType?: string;
+      status?: string;
+      capability?: string;
+      boundary?: string;
+    },
+    pagination?: PaginationState
+  ): Promise<{ items: unknown[]; total?: number }>;
 
   getTarget(idOrName: string): Promise<unknown | null>;
 
@@ -94,6 +108,13 @@ export interface CoordinatorServiceLayer {
     channelName: string,
     limit: number
   ): Promise<{ timestamp: string; handle: string; message: string }[]>;
+
+  // Batch operations
+  batchShutdownAgents(request: unknown): Promise<unknown>;
+
+  batchDisableTargets(request: unknown): Promise<unknown>;
+
+  batchCancelWork(request: unknown): Promise<unknown>;
 }
 
 /**
@@ -105,6 +126,14 @@ export function createExpressApp(
 ): Express {
   const app = express();
 
+  // Store WebSocket server reference for health endpoint
+  let wsServer: WeftWebSocketServer | null = null;
+
+  // Expose method to set WebSocket server (called after HTTP server starts)
+  (app as any).setWebSocketServer = (ws: WeftWebSocketServer) => {
+    wsServer = ws;
+  };
+
   // Basic middleware
   app.use(express.json());
 
@@ -114,7 +143,31 @@ export function createExpressApp(
     : {};
   app.use(cors(corsOptions));
 
+  // Get the path to the OpenAPI spec file
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const apiSpecPath = join(__dirname, 'openapi.yaml');
+
+  // Documentation routes (no auth required for public docs)
+  // Must come BEFORE OpenAPI validator and authentication middleware
+  app.use('/api', createDocsRouter());
+
+  // OpenAPI validation middleware
+  // This MUST come before route handlers to validate requests/responses
+  // But AFTER documentation routes to avoid validating them
+  app.use(
+    OpenApiValidator.middleware({
+      apiSpec: apiSpecPath,
+      validateRequests: true, // Validate incoming requests (400 on invalid)
+      validateResponses: true, // Validate outgoing responses (catch implementation bugs)
+      validateSecurity: false, // We handle bearer tokens separately
+      validateApiSpec: true, // Validate the spec itself on startup
+      ignorePaths: /\/api\/(docs|openapi\.json)/, // Don't validate documentation routes
+    }),
+  );
+
   // Authentication middleware (if tokens configured)
+  // Applied to all /api routes except docs
   const authMiddleware = createAuthMiddleware(config.authTokens);
   app.use('/api', authMiddleware);
 
@@ -127,7 +180,18 @@ export function createExpressApp(
 
   // Health check endpoint (no auth required)
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    const health: any = {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      documentation: '/api/docs'
+    };
+
+    // Include WebSocket stats if available
+    if (wsServer) {
+      health.websocket = wsServer.getStats();
+    }
+
+    res.json(health);
   });
 
   // 404 handler
@@ -140,18 +204,75 @@ export function createExpressApp(
 }
 
 /**
- * Starts the Express server
+ * Server context returned by startServer
+ */
+export interface ServerContext {
+  httpServer: HTTPServer;
+  wsServer: WeftWebSocketServer;
+  shutdown: () => Promise<void>;
+}
+
+/**
+ * Starts the Express server with WebSocket support
  */
 export async function startServer(
   app: Express,
   config: APIConfiguration,
-): Promise<void> {
+  serviceLayer?: CoordinatorServiceLayer,
+  projectId?: string
+): Promise<ServerContext> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(config.port, config.host, () => {
+    const httpServer = app.listen(config.port, config.host, () => {
       console.log(`API server listening on http://${config.host}:${config.port}`);
-      resolve();
+
+      // Create stats provider if service layer is available
+      const statsProvider = serviceLayer
+        ? async () => {
+            const stats = await serviceLayer.getStats();
+            return stats;
+          }
+        : undefined;
+
+      // Initialize WebSocket server with auth config
+      const wsConfig = {
+        requireAuth: config.authTokens && config.authTokens.length > 0,
+        allowedTokens: config.authTokens || []
+      };
+
+      const wsServer = new WeftWebSocketServer(
+        httpServer,
+        wsConfig,
+        statsProvider,
+        projectId
+      );
+      console.log(`WebSocket server listening on ws://${config.host}:${config.port}/api/ws`);
+
+      // Register WebSocket server with app for health endpoint
+      (app as any).setWebSocketServer(wsServer);
+
+      // Create shutdown function
+      const shutdown = async () => {
+        console.log('Shutting down servers...');
+
+        // Shutdown WebSocket server first
+        await wsServer.shutdown();
+
+        // Shutdown HTTP server
+        return new Promise<void>((resolve, reject) => {
+          httpServer.close((error) => {
+            if (error) {
+              reject(error);
+            } else {
+              console.log('HTTP server closed');
+              resolve();
+            }
+          });
+        });
+      };
+
+      resolve({ httpServer, wsServer, shutdown });
     });
 
-    server.on('error', reject);
+    httpServer.on('error', reject);
   });
 }

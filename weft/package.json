@@ -23,26 +23,32 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "validate-openapi": "swagger-cli validate src/api/openapi.yaml"
   },
   "dependencies": {
     "@loominal/shared": "workspace:*",
+    "cors": "^2.8.5",
+    "express": "^4.18.0",
+    "express-openapi-validator": "^5.6.0",
+    "js-yaml": "^4.1.1",
     "nats": "^2.28.0",
     "nats.ws": "^1.29.2",
-    "ws": "^8.18.0",
-    "express": "^4.18.0",
-    "cors": "^2.8.5",
     "ssh2": "^1.15.0",
-    "uuid": "^9.0.0"
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^9.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
     "@types/ssh2": "^1.15.0",
+    "@types/swagger-ui-express": "^4.1.8",
     "@types/uuid": "^9.0.7",
     "@types/ws": "^8.5.10",
-    "typescript": "^5.3.0",
     "tsx": "^4.6.0",
+    "typescript": "^5.3.0",
     "vitest": "^1.0.0"
   }
 }

@@ -1,0 +1,2043 @@
+openapi: 3.0.0
+info:
+  title: Weft API
+  version: 0.2.0
+  description: |
+    Coordinator service for Loominal multi-agent infrastructure.
+
+    Weft routes work, manages agent lifecycle, handles scaling, and provides a REST API
+    for fleet management. It runs as a multi-tenant service that handles multiple projects
+    in a single deployment.
+
+    ## Key Features
+    - **Agent Management**: Register, discover, and shutdown agents
+    - **Work Distribution**: Submit and track work items across agents
+    - **Spin-Up Targets**: Manage dynamic agent provisioning
+    - **Batch Operations**: Perform bulk operations on agents, targets, and work
+    - **Pagination**: All list endpoints support cursor-based pagination
+    - **Semantic Context**: Responses include resolved agent details for better decision-making
+
+  contact:
+    name: Michael LoPresti
+    email: mike@lopresti.org
+
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+  - url: https://weft.loominal.dev
+    description: Production server
+
+tags:
+  - name: Health
+    description: Service health and status
+  - name: Agents
+    description: Agent registration and management
+  - name: Work
+    description: Work item submission and tracking
+  - name: Targets
+    description: Spin-up target registration and management
+  - name: Stats
+    description: Coordinator statistics and metrics
+  - name: Channels
+    description: Inter-agent communication channels
+  - name: WebSocket
+    description: Real-time event subscriptions via WebSocket
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns the current health status of the Weft service
+      operationId: getHealth
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - timestamp
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                    example: '2025-12-23T15:30:00Z'
+
+  /api/agents:
+    get:
+      summary: List registered agents
+      description: |
+        Returns a paginated list of registered agents with optional filtering.
+        Supports cursor-based pagination for efficient traversal of large agent fleets.
+      operationId: listAgents
+      tags:
+        - Agents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          description: Filter by agent type
+          schema:
+            $ref: '#/components/schemas/AgentType'
+        - name: status
+          in: query
+          description: Filter by agent status
+          schema:
+            $ref: '#/components/schemas/AgentStatus'
+        - name: capability
+          in: query
+          description: Filter by capability
+          schema:
+            type: string
+            example: typescript
+        - name: cursor
+          in: query
+          description: Pagination cursor from previous response
+          schema:
+            type: string
+            example: eyJvZmZzZXQiOjUwLCJsaW1pdCI6NTB9
+        - name: limit
+          in: query
+          description: Maximum number of agents to return per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: List of agents with pagination metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - agents
+                  - count
+                  - hasMore
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RegisteredAgent'
+                  count:
+                    type: integer
+                    description: Number of agents in this page
+                    example: 50
+                  total:
+                    type: integer
+                    description: Total number of agents matching filter
+                    example: 847
+                  hasMore:
+                    type: boolean
+                    description: Whether more results are available
+                    example: true
+                  nextCursor:
+                    type: string
+                    nullable: true
+                    description: Cursor for fetching the next page
+                    example: eyJvZmZzZXQiOjUwLCJsaW1pdCI6NTB9
+                  prevCursor:
+                    type: string
+                    nullable: true
+                    description: Cursor for fetching the previous page
+                    example: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/agents/{guid}:
+    get:
+      summary: Get agent details
+      description: Returns detailed information about a specific agent by GUID
+      operationId: getAgent
+      tags:
+        - Agents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: guid
+          in: path
+          required: true
+          description: Agent GUID
+          schema:
+            type: string
+            format: uuid
+            example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisteredAgent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/agents/{guid}/shutdown:
+    post:
+      summary: Request agent shutdown
+      description: |
+        Requests a specific agent to shutdown. Supports graceful shutdown
+        where the agent completes current work before terminating.
+      operationId: shutdownAgent
+      tags:
+        - Agents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: guid
+          in: path
+          required: true
+          description: Agent GUID to shutdown
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                graceful:
+                  type: boolean
+                  default: true
+                  description: Wait for current work to complete before shutdown
+                  example: true
+      responses:
+        '200':
+          description: Shutdown request sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                  - graceful
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Shutdown request sent to agent 550e8400-e29b-41d4-a716-446655440000
+                  graceful:
+                    type: boolean
+                    example: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/agents/shutdown-batch:
+    post:
+      summary: Batch shutdown agents
+      description: |
+        Shuts down multiple agents matching filter criteria or specific GUIDs.
+        Useful for scaling down agent fleets or maintenance operations.
+      operationId: batchShutdownAgents
+      tags:
+        - Agents
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchShutdownRequest'
+            examples:
+              filterBased:
+                summary: Shutdown idle agents
+                value:
+                  filter:
+                    status: idle
+                    idleTimeMs: 300000
+                  graceful: true
+                  reason: scaling-down
+              guidBased:
+                summary: Shutdown specific agents
+                value:
+                  agentGuids:
+                    - 550e8400-e29b-41d4-a716-446655440000
+                    - 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+                  graceful: true
+      responses:
+        '200':
+          description: Batch operation results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchShutdownResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/work:
+    get:
+      summary: List work items
+      description: |
+        Returns a paginated list of work items with optional filtering.
+        Includes semantic context with resolved agent details when work is assigned.
+      operationId: listWork
+      tags:
+        - Work
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          description: Filter by work status
+          schema:
+            $ref: '#/components/schemas/WorkItemStatus'
+        - name: boundary
+          in: query
+          description: Filter by boundary/classification
+          schema:
+            type: string
+            example: personal
+        - name: classification
+          in: query
+          deprecated: true
+          description: (Deprecated) Use 'boundary' instead
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: Pagination cursor from previous response
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum number of items to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: List of work items with pagination
+          headers:
+            X-Deprecated-Param:
+              description: Indicates use of deprecated parameter
+              schema:
+                type: string
+                example: classification (use boundary instead)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - workItems
+                  - count
+                  - hasMore
+                properties:
+                  workItems:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkItemResponse'
+                  count:
+                    type: integer
+                    example: 50
+                  total:
+                    type: integer
+                    example: 200
+                  hasMore:
+                    type: boolean
+                    example: true
+                  nextCursor:
+                    type: string
+                    nullable: true
+                  prevCursor:
+                    type: string
+                    nullable: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      summary: Submit new work item
+      description: |
+        Submits a new work item to the coordinator for routing and assignment.
+        The coordinator will match the work to available agents or trigger spin-up.
+      operationId: submitWork
+      tags:
+        - Work
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkSubmitRequest'
+            example:
+              taskId: task-123
+              boundary: personal
+              capability: typescript
+              description: Implement feature X
+              priority: 7
+              preferredAgentType: claude-code
+      responses:
+        '201':
+          description: Work item created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkSubmitResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/work/{id}:
+    get:
+      summary: Get work item details
+      description: |
+        Returns detailed information about a specific work item including
+        semantic context with resolved agent details if assigned.
+      operationId: getWorkItem
+      tags:
+        - Work
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Work item ID
+          schema:
+            type: string
+            example: abc-123
+      responses:
+        '200':
+          description: Work item details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkItemResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/work/{id}/cancel:
+    post:
+      summary: Cancel work item
+      description: Cancels a specific work item if it hasn't been completed
+      operationId: cancelWorkItem
+      tags:
+        - Work
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Work item ID to cancel
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Work item cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Work item abc-123 cancelled
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/work/cancel-batch:
+    post:
+      summary: Batch cancel work items
+      description: |
+        Cancels multiple work items matching filter criteria or specific IDs.
+        Optionally reassigns cancelled work to other agents.
+      operationId: batchCancelWork
+      tags:
+        - Work
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchCancelWorkRequest'
+            examples:
+              filterBased:
+                summary: Cancel pending low-priority work
+                value:
+                  filter:
+                    status: pending
+                    minPriority: 3
+                  reason: resource-constraint
+              guidBased:
+                summary: Cancel specific work items
+                value:
+                  workItemIds:
+                    - task-1
+                    - task-2
+                  reason: user-requested
+      responses:
+        '200':
+          description: Batch operation results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchCancelWorkResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/targets:
+    get:
+      summary: List spin-up targets
+      description: |
+        Returns a paginated list of registered spin-up targets with optional filtering.
+        Includes semantic context with last spin-up information and agent details.
+      operationId: listTargets
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          description: Filter by agent type
+          schema:
+            $ref: '#/components/schemas/AgentType'
+        - name: status
+          in: query
+          description: Filter by target status
+          schema:
+            $ref: '#/components/schemas/TargetStatus'
+        - name: capability
+          in: query
+          description: Filter by capability
+          schema:
+            type: string
+        - name: boundary
+          in: query
+          description: Filter by allowed boundary
+          schema:
+            type: string
+        - name: classification
+          in: query
+          deprecated: true
+          description: (Deprecated) Use 'boundary' instead
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: Pagination cursor
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Page size
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: List of targets with pagination
+          headers:
+            X-Deprecated-Param:
+              description: Indicates use of deprecated parameter
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - targets
+                  - count
+                  - hasMore
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TargetResponse'
+                  count:
+                    type: integer
+                  total:
+                    type: integer
+                  hasMore:
+                    type: boolean
+                  nextCursor:
+                    type: string
+                    nullable: true
+                  prevCursor:
+                    type: string
+                    nullable: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      summary: Register new spin-up target
+      description: |
+        Registers a new target for dynamic agent provisioning.
+        Targets can use various mechanisms (SSH, Kubernetes, GitHub Actions, etc.)
+      operationId: registerTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetRegisterRequest'
+            examples:
+              ssh:
+                summary: SSH target
+                value:
+                  name: home-server
+                  description: Home lab server
+                  agentType: claude-code
+                  capabilities: [typescript, python]
+                  boundaries: [personal]
+                  mechanism: ssh
+                  config:
+                    mechanism: ssh
+                    ssh:
+                      host: server.home.lan
+                      user: agent
+                      command: /usr/local/bin/claude-code
+              kubernetes:
+                summary: Kubernetes target
+                value:
+                  name: k8s-claude
+                  agentType: claude-code
+                  capabilities: [typescript]
+                  mechanism: kubernetes
+                  config:
+                    mechanism: kubernetes
+                    kubernetes:
+                      namespace: loominal
+                      jobNamePrefix: claude-agent
+                      image: ghcr.io/loominal/claude-code:latest
+      responses:
+        '201':
+          description: Target registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/targets/{id}:
+    get:
+      summary: Get target details
+      description: Returns detailed information about a specific target including last spin-up event
+      operationId: getTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target ID or name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Target details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Update target
+      description: Updates an existing spin-up target configuration
+      operationId: updateTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target ID or name
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+                boundaries:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Target updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      summary: Remove target
+      description: Removes a spin-up target from the registry
+      operationId: removeTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target ID or name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Target removed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/targets/{id}/test:
+    post:
+      summary: Health check target
+      description: Performs a health check on a spin-up target to verify it's reachable
+      operationId: testTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target ID or name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Health check results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/targets/{id}/spin-up:
+    post:
+      summary: Trigger spin-up for target
+      description: Manually triggers agent provisioning using the specified target
+      operationId: spinUpTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Target ID or name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Spin-up initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpinUpResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/targets/{id}/disable:
+    post:
+      summary: Disable target
+      description: Disables a target to prevent future spin-ups
+      operationId: disableTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Target disabled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/targets/{id}/enable:
+    post:
+      summary: Enable target
+      description: Re-enables a previously disabled target
+      operationId: enableTarget
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Target enabled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/targets/disable-batch:
+    post:
+      summary: Batch disable targets
+      description: Disables multiple targets matching filter criteria or specific IDs
+      operationId: batchDisableTargets
+      tags:
+        - Targets
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchDisableTargetsRequest'
+            example:
+              filter:
+                status: error
+                mechanism: ssh
+              preventSpinUp: true
+      responses:
+        '200':
+          description: Batch operation results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDisableTargetsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/stats:
+    get:
+      summary: Get coordinator statistics
+      description: |
+        Returns global statistics across all projects (multi-tenant)
+        or default project stats if not multi-tenant
+      operationId: getStats
+      tags:
+        - Stats
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Coordinator statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - timestamp
+                  - agents
+                  - work
+                  - targets
+                properties:
+                  timestamp:
+                    type: string
+                    format: date-time
+                  agents:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      byType:
+                        type: object
+                        additionalProperties:
+                          type: integer
+                      byStatus:
+                        type: object
+                        additionalProperties:
+                          type: integer
+                  work:
+                    type: object
+                    properties:
+                      pending:
+                        type: integer
+                      active:
+                        type: integer
+                      completed:
+                        type: integer
+                      failed:
+                        type: integer
+                  targets:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      available:
+                        type: integer
+                      inUse:
+                        type: integer
+                      disabled:
+                        type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/stats/projects:
+    get:
+      summary: List active projects
+      description: Returns a list of all active projects in the coordinator
+      operationId: listProjects
+      tags:
+        - Stats
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of active projects
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - timestamp
+                  - projects
+                  - count
+                properties:
+                  timestamp:
+                    type: string
+                    format: date-time
+                  projects:
+                    type: array
+                    items:
+                      type: string
+                    example: [default, project-alpha, project-beta]
+                  count:
+                    type: integer
+                    example: 3
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/channels:
+    get:
+      summary: List available channels
+      description: Returns the list of available communication channels for a project
+      operationId: listChannels
+      tags:
+        - Channels
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          description: Project ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of channels
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - channels
+                  - count
+                  - projectId
+                properties:
+                  channels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
+                  count:
+                    type: integer
+                  projectId:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/channels/{name}/messages:
+    get:
+      summary: Read channel messages
+      description: Returns recent messages from a specific channel
+      operationId: readChannelMessages
+      tags:
+        - Channels
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Channel name
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: true
+          description: Project ID
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Maximum messages to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 50
+      responses:
+        '200':
+          description: Channel messages
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - channel
+                  - messages
+                  - count
+                  - projectId
+                properties:
+                  channel:
+                    type: string
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChannelMessage'
+                  count:
+                    type: integer
+                  projectId:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/ws:
+    get:
+      summary: WebSocket endpoint for real-time events
+      description: |
+        WebSocket endpoint for subscribing to real-time coordinator events.
+
+        **Note:** OpenAPI 3.0 has limited WebSocket support. This endpoint uses the WebSocket
+        protocol, not HTTP. See the [WebSocket API Documentation](../WEBSOCKET_API.md) for
+        complete details on the subscription protocol, message formats, and event types.
+
+        ## Connection
+        - **URL:** `ws://localhost:3000/api/ws` (development)
+        - **URL:** `wss://weft.example.com/api/ws` (production)
+
+        ## Authentication
+        Optional bearer token via query parameter or Sec-WebSocket-Protocol header:
+        - Query: `ws://localhost:3000/api/ws?token=your-token`
+        - Header: Use protocol `['bearer', 'your-token']`
+
+        ## Message Protocol
+
+        ### Client → Server
+        - `subscribe` - Subscribe to a topic (work, agents, targets, stats)
+        - `unsubscribe` - Unsubscribe from a topic
+        - `ping` - Check connection health
+
+        ### Server → Client
+        - `ack` - Acknowledge subscription/unsubscription
+        - `event` - Real-time coordinator event
+        - `stats` - Periodic statistics (every 30s)
+        - `error` - Error notification
+        - `pong` - Response to ping
+
+        ## Topics
+        - **work** - Work submission, assignment, completion events
+        - **agents** - Agent registration, status, shutdown events
+        - **targets** - Target configuration, health, spin-up events
+        - **stats** - Periodic system statistics
+
+        ## Event Types (19 total)
+
+        ### Work Events (7)
+        - `work:submitted` - Work item created
+        - `work:assigned` - Work assigned to agent
+        - `work:started` - Agent started working
+        - `work:progress` - Progress update
+        - `work:completed` - Work completed successfully
+        - `work:failed` - Work failed with error
+        - `work:cancelled` - Work cancelled
+
+        ### Agent Events (3)
+        - `agent:registered` - New agent joined
+        - `agent:updated` - Agent status changed
+        - `agent:shutdown` - Agent shut down
+
+        ### Target Events (5)
+        - `target:registered` - New target configured
+        - `target:updated` - Target config changed
+        - `target:disabled` - Target disabled
+        - `target:removed` - Target removed
+        - `target:health-changed` - Target health check result
+
+        ### Spin-Up Events (4)
+        - `spin-up:triggered` - Spin-up requested
+        - `spin-up:started` - Spin-up process started
+        - `spin-up:completed` - Agent spun up successfully
+        - `spin-up:failed` - Spin-up failed
+
+        ## Example Messages
+
+        **Subscribe to work events:**
+        ```json
+        {
+          "type": "subscribe",
+          "topic": "work",
+          "filter": { "status": "pending" }
+        }
+        ```
+
+        **Acknowledgement:**
+        ```json
+        {
+          "type": "ack",
+          "subscribed": "work",
+          "timestamp": "2025-12-23T09:00:00.000Z"
+        }
+        ```
+
+        **Event notification:**
+        ```json
+        {
+          "type": "event",
+          "topic": "work",
+          "event": "work:assigned",
+          "data": {
+            "workId": "...",
+            "taskId": "...",
+            "assignedTo": "...",
+            "capability": "typescript"
+          },
+          "timestamp": "2025-12-23T09:00:00.000Z"
+        }
+        ```
+
+        ## Server-Side Filtering
+
+        Filters reduce bandwidth by filtering events server-side:
+
+        **Work filters:**
+        - `status` - Filter by work status
+        - `capability` - Filter by capability
+        - `boundary` - Filter by boundary
+        - `taskId` - Filter by task ID
+        - `assignedTo` - Filter by agent GUID
+
+        **Agent filters:**
+        - `agentType` - Filter by agent type
+        - `status` - Filter by agent status
+        - `capability` - Filter by capability
+        - `boundary` - Filter by boundary
+        - `guid` - Filter by agent GUID
+
+        **Target filters:**
+        - `agentType` - Filter by agent type
+        - `status` - Filter by target status
+        - `capability` - Filter by capability
+        - `boundary` - Filter by boundary
+        - `mechanism` - Filter by spin-up mechanism
+        - `targetId` - Filter by target ID
+
+        ## Performance
+        - **Connections:** 100+ concurrent clients
+        - **Throughput:** 50+ events/second per client
+        - **Latency:** <10ms event delivery
+        - **Heartbeat:** Ping every 30s, timeout at 35s
+
+        ## Complete Documentation
+        For complete protocol specification, code examples, and best practices, see:
+        **[WebSocket API Documentation](../WEBSOCKET_API.md)**
+
+      operationId: websocketEndpoint
+      tags:
+        - WebSocket
+      responses:
+        '101':
+          description: |
+            Switching Protocols - WebSocket connection established.
+
+            Note: This is a WebSocket endpoint. After the upgrade, communication
+            uses the WebSocket protocol with JSON messages as described above.
+        '400':
+          description: Bad Request - Invalid WebSocket upgrade request
+        '401':
+          description: Unauthorized - Invalid or missing authentication token
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token authentication (configure via API_TOKENS env var)
+
+  schemas:
+    AgentType:
+      type: string
+      enum:
+        - copilot-cli
+        - claude-code
+      description: Type of AI agent
+
+    AgentStatus:
+      type: string
+      enum:
+        - online
+        - busy
+        - offline
+      description: Current status of an agent
+
+    WorkItemStatus:
+      type: string
+      enum:
+        - pending
+        - assigned
+        - in-progress
+        - completed
+        - failed
+        - cancelled
+      description: Status of a work item
+
+    TargetStatus:
+      type: string
+      enum:
+        - available
+        - in-use
+        - disabled
+        - error
+      description: Status of a spin-up target
+
+    Priority:
+      type: integer
+      minimum: 1
+      maximum: 10
+      description: Priority level (1=lowest, 10=highest)
+
+    AgentSummary:
+      type: object
+      description: Summary information about an agent for semantic context
+      required:
+        - guid
+        - agentType
+      properties:
+        guid:
+          type: string
+          format: uuid
+          description: Unique agent identifier
+        handle:
+          type: string
+          description: Agent handle/username
+        agentType:
+          $ref: '#/components/schemas/AgentType'
+        hostname:
+          type: string
+          description: Hostname where agent is running
+
+    RegisteredAgent:
+      type: object
+      required:
+        - guid
+        - handle
+        - agentType
+        - status
+        - capabilities
+        - boundaries
+        - hostname
+        - projectId
+        - visibility
+        - currentTaskCount
+        - maxConcurrentTasks
+        - spindownAfterIdleMs
+        - lastHeartbeat
+        - lastActivity
+        - registeredAt
+      properties:
+        guid:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        agentType:
+          $ref: '#/components/schemas/AgentType'
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        capabilities:
+          type: array
+          items:
+            type: string
+        boundaries:
+          type: array
+          items:
+            type: string
+          description: Workload boundaries this agent accepts
+        hostname:
+          type: string
+        projectId:
+          type: string
+        username:
+          type: string
+        visibility:
+          type: string
+          enum: [private, project-only, user-only, public]
+        currentTaskCount:
+          type: integer
+        maxConcurrentTasks:
+          type: integer
+        spindownAfterIdleMs:
+          type: integer
+        lastHeartbeat:
+          type: string
+          format: date-time
+        lastActivity:
+          type: string
+          format: date-time
+        registeredAt:
+          type: string
+          format: date-time
+
+    WorkItemResponse:
+      type: object
+      description: Work item with semantic context (resolved agent details)
+      required:
+        - id
+        - taskId
+        - capability
+        - description
+        - priority
+        - boundary
+        - status
+        - offeredBy
+        - offeredAt
+        - attempts
+      properties:
+        id:
+          type: string
+        taskId:
+          type: string
+        capability:
+          type: string
+        description:
+          type: string
+        priority:
+          $ref: '#/components/schemas/Priority'
+        boundary:
+          type: string
+          description: Workload boundary for routing
+        preferredAgentType:
+          $ref: '#/components/schemas/AgentType'
+        requiredAgentType:
+          $ref: '#/components/schemas/AgentType'
+        status:
+          $ref: '#/components/schemas/WorkItemStatus'
+        assignedTo:
+          type: string
+          format: uuid
+          description: Assigned agent GUID
+        assignedToAgent:
+          $ref: '#/components/schemas/AgentSummary'
+          description: Resolved agent details if assigned
+        assignedAt:
+          type: string
+          format: date-time
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        offeredBy:
+          type: string
+        offeredAt:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+        deadline:
+          type: string
+          format: date-time
+        contextData:
+          type: object
+          additionalProperties: true
+
+    WorkSubmitRequest:
+      type: object
+      required:
+        - taskId
+        - boundary
+        - capability
+        - description
+      properties:
+        taskId:
+          type: string
+          description: Application-defined task identifier
+        boundary:
+          type: string
+          description: Workload boundary for routing
+        capability:
+          type: string
+          description: Required capability
+        description:
+          type: string
+          description: Human-readable task description
+        priority:
+          $ref: '#/components/schemas/Priority'
+          default: 5
+        preferredAgentType:
+          $ref: '#/components/schemas/AgentType'
+        requiredAgentType:
+          $ref: '#/components/schemas/AgentType'
+        deadline:
+          type: string
+          format: date-time
+        contextData:
+          type: object
+          additionalProperties: true
+
+    WorkSubmitResponse:
+      type: object
+      required:
+        - id
+        - workItemId
+        - targetAgentType
+        - spinUpTriggered
+      properties:
+        id:
+          type: string
+          description: Generated work item ID
+        workItemId:
+          type: string
+          deprecated: true
+          description: Use 'id' instead
+        targetAgentType:
+          $ref: '#/components/schemas/AgentType'
+        spinUpTriggered:
+          type: boolean
+        estimatedWaitSeconds:
+          type: integer
+
+    SpinUpEvent:
+      type: object
+      description: Information about a spin-up event
+      required:
+        - time
+        - outcome
+      properties:
+        time:
+          type: string
+          format: date-time
+        agent:
+          $ref: '#/components/schemas/AgentSummary'
+        workItemId:
+          type: string
+        outcome:
+          type: string
+          enum: [success, failure]
+        error:
+          type: string
+
+    TargetResponse:
+      type: object
+      description: Spin-up target with semantic context (last spin-up details)
+      required:
+        - id
+        - name
+        - agentType
+        - capabilities
+        - boundaries
+        - mechanism
+        - status
+        - healthStatus
+        - registeredBy
+        - registeredAt
+        - updatedAt
+        - useCount
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        agentType:
+          $ref: '#/components/schemas/AgentType'
+        capabilities:
+          type: array
+          items:
+            type: string
+        boundaries:
+          type: array
+          items:
+            type: string
+        mechanism:
+          type: string
+          enum: [ssh, github-actions, local, webhook, kubernetes]
+        config:
+          type: object
+          description: Mechanism-specific configuration
+        status:
+          $ref: '#/components/schemas/TargetStatus'
+        currentAgentGuid:
+          type: string
+          format: uuid
+        healthStatus:
+          type: string
+          enum: [healthy, unhealthy, unknown]
+        lastError:
+          type: string
+        registeredBy:
+          type: string
+          enum: [cli, api, agent, config]
+        registeredByAgentGuid:
+          type: string
+          format: uuid
+        registeredAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+        useCount:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        lastSpinUp:
+          $ref: '#/components/schemas/SpinUpEvent'
+          description: Information about the last spin-up event
+
+    TargetRegisterRequest:
+      type: object
+      required:
+        - name
+        - agentType
+        - capabilities
+        - mechanism
+        - config
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        agentType:
+          $ref: '#/components/schemas/AgentType'
+        capabilities:
+          type: array
+          items:
+            type: string
+        boundaries:
+          type: array
+          items:
+            type: string
+        mechanism:
+          type: string
+          enum: [ssh, github-actions, local, webhook, kubernetes]
+        config:
+          type: object
+          description: Mechanism-specific configuration
+        healthCheck:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            intervalMs:
+              type: integer
+            timeoutMs:
+              type: integer
+        tags:
+          type: array
+          items:
+            type: string
+
+    SpinUpResult:
+      type: object
+      required:
+        - success
+        - targetId
+        - targetName
+        - timestamp
+      properties:
+        success:
+          type: boolean
+        targetId:
+          type: string
+        targetName:
+          type: string
+        error:
+          type: string
+        mechanismResult:
+          type: object
+          properties:
+            pid:
+              type: integer
+            runId:
+              type: integer
+            jobName:
+              type: string
+            response:
+              type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthCheckResult:
+      type: object
+      required:
+        - targetId
+        - healthy
+        - timestamp
+      properties:
+        targetId:
+          type: string
+        healthy:
+          type: boolean
+        error:
+          type: string
+        responseTimeMs:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    BatchShutdownRequest:
+      type: object
+      properties:
+        filter:
+          type: object
+          description: Filter criteria for selecting agents
+          properties:
+            status:
+              $ref: '#/components/schemas/AgentStatus'
+            idleTimeMs:
+              type: integer
+            agentType:
+              $ref: '#/components/schemas/AgentType'
+            boundary:
+              type: string
+            capability:
+              type: string
+        agentGuids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Specific agent GUIDs to shutdown
+        graceful:
+          type: boolean
+          default: true
+        gracePeriodMs:
+          type: integer
+          default: 30000
+        reason:
+          type: string
+          enum: [manual, scaling-down, maintenance, error]
+
+    BatchShutdownResponse:
+      type: object
+      required:
+        - success
+        - failed
+        - count
+        - errors
+        - completedAt
+        - totalProcessed
+        - successRate
+        - shutdownAgents
+        - graceful
+      properties:
+        success:
+          type: array
+          items:
+            type: string
+        failed:
+          type: array
+          items:
+            type: string
+        count:
+          type: integer
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+        completedAt:
+          type: string
+          format: date-time
+        totalProcessed:
+          type: integer
+        successRate:
+          type: number
+          format: float
+        shutdownAgents:
+          type: array
+          items:
+            type: string
+        graceful:
+          type: boolean
+
+    BatchCancelWorkRequest:
+      type: object
+      properties:
+        filter:
+          type: object
+          properties:
+            status:
+              type: string
+            boundary:
+              type: string
+            capability:
+              type: string
+            minPriority:
+              type: integer
+            assignedTo:
+              type: string
+              format: uuid
+        workItemIds:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+          enum: [user-requested, deadline-passed, resource-constraint, system-shutdown]
+        reassign:
+          type: boolean
+          default: false
+
+    BatchCancelWorkResponse:
+      type: object
+      required:
+        - success
+        - failed
+        - count
+        - errors
+        - completedAt
+        - totalProcessed
+        - successRate
+        - cancelledItems
+        - reassignedItems
+        - notCancellable
+      properties:
+        success:
+          type: array
+          items:
+            type: string
+        failed:
+          type: array
+          items:
+            type: string
+        count:
+          type: integer
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+        completedAt:
+          type: string
+          format: date-time
+        totalProcessed:
+          type: integer
+        successRate:
+          type: number
+        cancelledItems:
+          type: array
+          items:
+            type: string
+        reassignedItems:
+          type: array
+          items:
+            type: string
+        notCancellable:
+          type: array
+          items:
+            type: string
+
+    BatchDisableTargetsRequest:
+      type: object
+      properties:
+        filter:
+          type: object
+          properties:
+            agentType:
+              $ref: '#/components/schemas/AgentType'
+            status:
+              type: string
+            mechanism:
+              type: string
+        targetIds:
+          type: array
+          items:
+            type: string
+        preventSpinUp:
+          type: boolean
+          default: true
+
+    BatchDisableTargetsResponse:
+      type: object
+      required:
+        - success
+        - failed
+        - count
+        - errors
+        - completedAt
+        - totalProcessed
+        - successRate
+        - disabledTargets
+        - alreadyDisabled
+      properties:
+        success:
+          type: array
+          items:
+            type: string
+        failed:
+          type: array
+          items:
+            type: string
+        count:
+          type: integer
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+        completedAt:
+          type: string
+          format: date-time
+        totalProcessed:
+          type: integer
+        successRate:
+          type: number
+        disabledTargets:
+          type: array
+          items:
+            type: string
+        alreadyDisabled:
+          type: array
+          items:
+            type: string
+
+    ChannelMessage:
+      type: object
+      required:
+        - timestamp
+        - handle
+        - message
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        handle:
+          type: string
+          description: Sender handle
+        message:
+          type: string
+          description: Message content
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Error message
+        details:
+          type: object
+          description: Additional error details
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: ValidationError
+            message: Invalid request parameters
+
+    Unauthorized:
+      description: Unauthorized - missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Unauthorized
+            message: Invalid or missing authentication token
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: NotFound
+            message: Resource not found
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: InternalServerError
+            message: An unexpected error occurred

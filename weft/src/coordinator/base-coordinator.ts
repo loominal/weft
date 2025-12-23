@@ -3,12 +3,22 @@
  *
  * Handles work item storage, assignment tracking, and completion recording.
  * Uses in-memory storage with optional persistence callbacks.
+ * Emits events for all state changes.
  */
 
+import { EventEmitter } from 'events';
 import type {
   CoordinatedWorkItem,
   WorkItemStatus,
   Priority,
+  WorkSubmittedEvent,
+  WorkAssignedEvent,
+  WorkStartedEvent,
+  WorkProgressEvent,
+  WorkCompletedEvent,
+  WorkFailedEvent,
+  WorkCancelledEvent,
+  CoordinatorEventType,
 } from '@loominal/shared';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -28,6 +38,8 @@ export interface WorkRequest {
  * Base coordinator configuration
  */
 export interface BaseCoordinatorConfig {
+  /** Project ID for event metadata */
+  projectId?: string;
   /** How long before unassigned work is considered stale (ms) */
   staleThresholdMs?: number;
   /** How often to clean up stale work (ms) */
@@ -56,14 +68,25 @@ export interface CoordinatorStats {
 
 /**
  * Base coordinator class for work management
+ *
+ * Events emitted:
+ * - 'work:submitted' (WorkSubmittedEvent): When work is submitted
+ * - 'work:assigned' (WorkAssignedEvent): When work is assigned to an agent
+ * - 'work:started' (WorkStartedEvent): When work transitions to in-progress
+ * - 'work:progress' (WorkProgressEvent): When work progress is updated
+ * - 'work:completed' (WorkCompletedEvent): When work completes successfully
+ * - 'work:failed' (WorkFailedEvent): When work fails with an error
+ * - 'work:cancelled' (WorkCancelledEvent): When work is cancelled
  */
-export class BaseCoordinator {
+export class BaseCoordinator extends EventEmitter {
   private workItems: Map<string, CoordinatedWorkItem> = new Map();
   private config: Required<BaseCoordinatorConfig>;
   private cleanupInterval?: NodeJS.Timeout;
 
   constructor(config: BaseCoordinatorConfig = {}) {
+    super();
     this.config = {
+      projectId: config.projectId ?? 'default',
       staleThresholdMs: config.staleThresholdMs ?? 300000, // 5 minutes
       cleanupIntervalMs: config.cleanupIntervalMs ?? 60000, // 1 minute
     };
@@ -99,6 +122,21 @@ export class BaseCoordinator {
     };
 
     this.workItems.set(id, workItem);
+
+    // Emit work submitted event
+    const event: WorkSubmittedEvent = {
+      type: 'work:submitted' as CoordinatorEventType.WORK_SUBMITTED,
+      timestamp: now,
+      projectId: this.config.projectId,
+      workId: id,
+      taskId: request.taskId,
+      capability: request.capability,
+      boundary: workItem.boundary,
+      priority: workItem.priority,
+      description: request.description,
+    };
+    this.emit('work:submitted', event);
+
     return id;
   }
 
@@ -124,10 +162,29 @@ export class BaseCoordinator {
       return false;
     }
 
+    const now = new Date().toISOString();
     workItem.status = 'assigned';
     workItem.assignedTo = workerGuid;
-    workItem.assignedAt = new Date().toISOString();
+    workItem.assignedAt = now;
     workItem.attempts += 1;
+
+    // Emit work assigned event
+    // Note: AgentSummary will be populated by ExtendedCoordinator
+    const event: WorkAssignedEvent = {
+      type: 'work:assigned' as CoordinatorEventType.WORK_ASSIGNED,
+      timestamp: now,
+      projectId: this.config.projectId,
+      workId: workItemId,
+      taskId: workItem.taskId,
+      assignedTo: workerGuid,
+      assignedToAgent: {
+        guid: workerGuid,
+        agentType: 'claude-code', // Default, will be enriched by ExtendedCoordinator
+      },
+      capability: workItem.capability,
+      boundary: workItem.boundary,
+    };
+    this.emit('work:assigned', event);
 
     return true;
   }
@@ -141,7 +198,26 @@ export class BaseCoordinator {
       return false;
     }
 
+    const now = new Date().toISOString();
     workItem.status = 'in-progress';
+
+    // Emit work started event
+    if (workItem.assignedTo) {
+      const event: WorkStartedEvent = {
+        type: 'work:started' as CoordinatorEventType.WORK_STARTED,
+        timestamp: now,
+        projectId: this.config.projectId,
+        workId: workItemId,
+        taskId: workItem.taskId,
+        assignedTo: workItem.assignedTo,
+        assignedToAgent: {
+          guid: workItem.assignedTo,
+          agentType: 'claude-code',
+        },
+      };
+      this.emit('work:started', event);
+    }
+
     return true;
   }
 
@@ -154,7 +230,27 @@ export class BaseCoordinator {
       return false;
     }
 
+    const now = new Date().toISOString();
     workItem.progress = Math.min(100, Math.max(0, progress));
+
+    // Emit work progress event
+    if (workItem.assignedTo) {
+      const event: WorkProgressEvent = {
+        type: 'work:progress' as CoordinatorEventType.WORK_PROGRESS,
+        timestamp: now,
+        projectId: this.config.projectId,
+        workId: workItemId,
+        taskId: workItem.taskId,
+        assignedTo: workItem.assignedTo,
+        assignedToAgent: {
+          guid: workItem.assignedTo,
+          agentType: 'claude-code',
+        },
+        progress: workItem.progress,
+      };
+      this.emit('work:progress', event);
+    }
+
     return true;
   }
 
@@ -171,13 +267,30 @@ export class BaseCoordinator {
       return false;
     }
 
+    const now = new Date().toISOString();
     workItem.status = 'completed';
     workItem.progress = 100;
     workItem.result = {
       summary,
       output: result,
-      completedAt: new Date().toISOString(),
+      completedAt: now,
     };
+
+    // Emit work completed event
+    const event: WorkCompletedEvent = {
+      type: 'work:completed' as CoordinatorEventType.WORK_COMPLETED,
+      timestamp: now,
+      projectId: this.config.projectId,
+      workId: workItemId,
+      taskId: workItem.taskId,
+      assignedTo: workItem.assignedTo,
+      assignedToAgent: workItem.assignedTo ? {
+        guid: workItem.assignedTo,
+        agentType: 'claude-code',
+      } : undefined,
+      summary,
+    };
+    this.emit('work:completed', event);
 
     return true;
   }
@@ -195,12 +308,30 @@ export class BaseCoordinator {
       return false;
     }
 
+    const now = new Date().toISOString();
     workItem.status = 'failed';
     workItem.error = {
       message: errorMessage,
       recoverable,
-      occurredAt: new Date().toISOString(),
+      occurredAt: now,
     };
+
+    // Emit work failed event
+    const event: WorkFailedEvent = {
+      type: 'work:failed' as CoordinatorEventType.WORK_FAILED,
+      timestamp: now,
+      projectId: this.config.projectId,
+      workId: workItemId,
+      taskId: workItem.taskId,
+      assignedTo: workItem.assignedTo,
+      assignedToAgent: workItem.assignedTo ? {
+        guid: workItem.assignedTo,
+        agentType: 'claude-code',
+      } : undefined,
+      errorMessage,
+      recoverable,
+    };
+    this.emit('work:failed', event);
 
     return true;
   }
@@ -218,7 +349,24 @@ export class BaseCoordinator {
       return false;
     }
 
+    const now = new Date().toISOString();
     workItem.status = 'cancelled';
+
+    // Emit work cancelled event
+    const event: WorkCancelledEvent = {
+      type: 'work:cancelled' as CoordinatorEventType.WORK_CANCELLED,
+      timestamp: now,
+      projectId: this.config.projectId,
+      workId: workItemId,
+      taskId: workItem.taskId,
+      assignedTo: workItem.assignedTo,
+      assignedToAgent: workItem.assignedTo ? {
+        guid: workItem.assignedTo,
+        agentType: 'claude-code',
+      } : undefined,
+    };
+    this.emit('work:cancelled', event);
+
     return true;
   }
 
@@ -346,5 +494,6 @@ export class BaseCoordinator {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = undefined;
     }
+    this.removeAllListeners();
   }
 }

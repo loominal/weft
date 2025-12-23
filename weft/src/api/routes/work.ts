@@ -1,8 +1,14 @@
 import { Router } from 'express';
-import type { WorkSubmitRequest } from '@loominal/shared';
+import type { WorkSubmitRequest, BatchCancelWorkRequest } from '@loominal/shared';
 import type { CoordinatorServiceLayer } from '../server.js';
 import { APIError } from '../middleware/error.js';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  parsePaginationQuery,
+  createPaginationMetadata,
+  createFilterHash,
+  validateCursor,
+} from '../../utils/pagination.js';
 
 /**
  * Validates boundary (user-defined, just needs to be non-empty string)
@@ -37,13 +43,15 @@ export function createWorkRouter(service: CoordinatorServiceLayer): Router {
    * - status: Filter by status (pending, assigned, in-progress, completed, failed, cancelled)
    * - boundary: Filter by boundary/classification
    * - classification: (Deprecated) Use boundary instead
+   * - cursor: Pagination cursor for continuing a paginated query
+   * - limit: Maximum number of items to return (default: 50, max: 100)
    *
    * Deprecation: 'classification' parameter is deprecated. Use 'boundary' instead.
    * Both parameters are accepted for backward compatibility.
    */
   router.get('/', async (req, res, next) => {
     try {
-      const { status, boundary, classification } = req.query;
+      const { status, boundary, classification, cursor, limit } = req.query;
 
       const filter: {
         status?: string;
@@ -69,11 +77,44 @@ export function createWorkRouter(service: CoordinatorServiceLayer): Router {
         }
       }
 
-      const workItems = await service.listWork(filter);
+      // Parse pagination parameters
+      const pagination = parsePaginationQuery({
+        cursor: cursor as string | undefined,
+        limit: limit as string | undefined,
+      }, 50, 100);
+
+      // Validate cursor if provided
+      if (cursor) {
+        const filterHash = createFilterHash(filter);
+        const validation = validateCursor(cursor as string, filterHash);
+        if (!validation.valid) {
+          throw new APIError(400, validation.error || 'Invalid pagination cursor');
+        }
+      }
+
+      // Add pagination to filter
+      const workItems = await service.listWork({
+        ...filter,
+        offset: pagination.offset,
+        limit: pagination.limit,
+      });
+
+      // Create pagination metadata
+      const filterHash = createFilterHash(filter);
+      const metadata = createPaginationMetadata({
+        count: workItems.length,
+        offset: pagination.offset,
+        limit: pagination.limit,
+        filterHash,
+      });
 
       res.json({
         workItems,
-        count: workItems.length,
+        count: metadata.count,
+        total: metadata.total,
+        hasMore: metadata.hasMore,
+        nextCursor: metadata.nextCursor,
+        prevCursor: metadata.prevCursor,
       });
     } catch (err) {
       next(err);
@@ -193,6 +234,65 @@ export function createWorkRouter(service: CoordinatorServiceLayer): Router {
         success: true,
         message: `Work item ${id} cancelled`,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/work/cancel-batch
+   * Batch cancel work items
+   *
+   * Body: BatchCancelWorkRequest
+   * - filter: Filter criteria for selecting work items (alternative to workItemIds)
+   *   - status: Filter by work status
+   *   - boundary: Filter by boundary
+   *   - capability: Filter by capability
+   *   - minPriority: Filter by minimum priority
+   *   - assignedTo: Filter by assigned agent GUID
+   * - workItemIds: Specific work item IDs to cancel (alternative to filter)
+   * - reason: Reason for cancellation (user-requested, deadline-passed, resource-constraint, system-shutdown)
+   * - reassign: Whether to reassign cancelled work to other agents (default: false)
+   */
+  router.post('/cancel-batch', async (req, res, next) => {
+    try {
+      const request = req.body as Partial<BatchCancelWorkRequest>;
+
+      // Validate request - must have either filter or workItemIds
+      if (!request.filter && !request.workItemIds) {
+        throw new APIError(400, 'Either filter or workItemIds must be provided');
+      }
+
+      if (request.workItemIds && !Array.isArray(request.workItemIds)) {
+        throw new APIError(400, 'workItemIds must be an array');
+      }
+
+      if (request.filter) {
+        // Validate filter fields
+        if (request.filter.status && typeof request.filter.status !== 'string') {
+          throw new APIError(400, 'filter.status must be a string');
+        }
+        if (request.filter.boundary && typeof request.filter.boundary !== 'string') {
+          throw new APIError(400, 'filter.boundary must be a string');
+        }
+        if (request.filter.capability && typeof request.filter.capability !== 'string') {
+          throw new APIError(400, 'filter.capability must be a string');
+        }
+        if (request.filter.minPriority !== undefined && typeof request.filter.minPriority !== 'number') {
+          throw new APIError(400, 'filter.minPriority must be a number');
+        }
+        if (request.filter.assignedTo && typeof request.filter.assignedTo !== 'string') {
+          throw new APIError(400, 'filter.assignedTo must be a string');
+        }
+      }
+
+      if (request.reason && !['user-requested', 'deadline-passed', 'resource-constraint', 'system-shutdown'].includes(request.reason)) {
+        throw new APIError(400, 'Invalid reason. Must be one of: user-requested, deadline-passed, resource-constraint, system-shutdown');
+      }
+
+      const result = await service.batchCancelWork(request);
+
+      res.json(result);
     } catch (err) {
       next(err);
     }

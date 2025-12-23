@@ -85,3 +85,62 @@ export type {
   SpinUpResult,
   HealthCheckResult,
 } from './spin-up-target.js';
+
+// Pagination types
+export type {
+  PaginationCursor,
+  PaginationState,
+  PaginationMetadata,
+} from './pagination.js';
+
+// Batch operation types
+export type {
+  AgentBatchFilter,
+  BatchShutdownRequest,
+  TargetBatchFilter,
+  BatchDisableTargetsRequest,
+  WorkBatchFilter,
+  BatchCancelWorkRequest,
+  BatchOperationResponse,
+  BatchShutdownResponse,
+  BatchDisableTargetsResponse,
+  BatchCancelWorkResponse,
+} from './batch-operations.js';
+
+// Semantic context types (agent details in responses)
+export type {
+  AgentSummary,
+  WorkItemResponse,
+  SpinUpEvent,
+  TargetResponse,
+  ChannelMessageResponse,
+} from './semantic-context.js';
+
+// Coordinator event types
+export {
+  CoordinatorEventType,
+} from './coordinator-events.js';
+
+export type {
+  BaseCoordinatorEvent,
+  AgentRegisteredEvent,
+  AgentUpdatedEvent,
+  AgentShutdownEvent,
+  WorkSubmittedEvent,
+  WorkAssignedEvent,
+  WorkStartedEvent,
+  WorkProgressEvent,
+  WorkCompletedEvent,
+  WorkFailedEvent,
+  WorkCancelledEvent,
+  TargetRegisteredEvent,
+  TargetUpdatedEvent,
+  TargetDisabledEvent,
+  TargetRemovedEvent,
+  TargetHealthChangedEvent,
+  SpinUpTriggeredEvent,
+  SpinUpStartedEvent,
+  SpinUpCompletedEvent,
+  SpinUpFailedEvent,
+  CoordinatorEvent,
+} from './coordinator-events.js';

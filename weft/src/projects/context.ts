@@ -109,6 +109,39 @@ export async function createProjectContext(
     }
   });
 
+  // Wire up spin-up success/failure events to record in target registry
+  spinUpManager.on('spin-up:success', async (tracked) => {
+    console.log(`[${projectId}] Spin-up success for target: ${tracked.request.target.name}`);
+    await targetRegistry.recordSpinUp(
+      tracked.request.target.id,
+      'success',
+      undefined, // agent info would be resolved from registry if needed
+      tracked.request.workItemId,
+    );
+  });
+
+  spinUpManager.on('spin-up:failed', async (tracked) => {
+    console.log(`[${projectId}] Spin-up failed for target: ${tracked.request.target.name}`);
+    await targetRegistry.recordSpinUp(
+      tracked.request.target.id,
+      'failure',
+      undefined, // agent info would be resolved from registry if needed
+      tracked.request.workItemId,
+      tracked.error,
+    );
+  });
+
+  spinUpManager.on('spin-up:timeout', async (tracked) => {
+    console.log(`[${projectId}] Spin-up timeout for target: ${tracked.request.target.name}`);
+    await targetRegistry.recordSpinUp(
+      tracked.request.target.id,
+      'failure',
+      undefined, // agent info would be resolved from registry if needed
+      tracked.request.workItemId,
+      'Timeout',
+    );
+  });
+
   // Wire up idle shutdown signals
   idleTracker.on('shutdown-signal', async (agentGuid: string) => {
     console.log(`[${projectId}] Idle shutdown signal for agent: ${agentGuid}`);

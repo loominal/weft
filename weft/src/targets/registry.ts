@@ -7,6 +7,8 @@ import type {
   TargetQueryFilter,
   TargetStatus,
   HealthStatus,
+  SpinUpEvent,
+  AgentSummary,
 } from '@loominal/shared';
 import { KVBuckets, TargetSubjects } from '@loominal/shared';
 
@@ -18,6 +20,7 @@ import { KVBuckets, TargetSubjects } from '@loominal/shared';
  */
 export class TargetRegistry {
   private kv: KV | null = null;
+  private spinUpHistory = new Map<string, SpinUpEvent>(); // targetId -> lastSpinUp
 
   constructor(
     private nc: NatsConnection,
@@ -408,6 +411,59 @@ export class TargetRegistry {
         timestamp: target.lastHealthCheck,
       })
     );
+  }
+
+  /**
+   * Record a spin-up event for a target
+   */
+  async recordSpinUp(
+    targetId: string,
+    outcome: 'success' | 'failure',
+    agent?: AgentSummary,
+    workItemId?: string,
+    error?: string
+  ): Promise<void> {
+    const spinUpEvent: SpinUpEvent = {
+      time: new Date().toISOString(),
+      agent,
+      workItemId,
+      outcome,
+      error,
+    };
+
+    // Store in memory
+    this.spinUpHistory.set(targetId, spinUpEvent);
+
+    // Update target's lastUsedAt timestamp if successful
+    if (outcome === 'success') {
+      const target = await this.getTarget(targetId);
+      if (target) {
+        target.lastUsedAt = spinUpEvent.time;
+        target.updatedAt = new Date().toISOString();
+
+        if (this.kv) {
+          await this.kv.put(target.id, JSON.stringify(target));
+        }
+      }
+    }
+
+    // Publish spin-up event
+    const subject = TargetSubjects.update(this.projectId);
+    await this.nc.publish(
+      subject,
+      JSON.stringify({
+        type: 'spin-up',
+        targetId,
+        event: spinUpEvent,
+      })
+    );
+  }
+
+  /**
+   * Get last spin-up event for a target
+   */
+  getLastSpinUp(targetId: string): SpinUpEvent | undefined {
+    return this.spinUpHistory.get(targetId);
   }
 
   /**

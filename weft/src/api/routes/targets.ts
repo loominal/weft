@@ -1,7 +1,12 @@
 import { Router } from 'express';
-import type { TargetRegisterRequest } from '@loominal/shared';
+import type { TargetRegisterRequest, PaginationMetadata, BatchDisableTargetsRequest } from '@loominal/shared';
 import type { CoordinatorServiceLayer } from '../server.js';
 import { APIError } from '../middleware/error.js';
+import {
+  parsePaginationQuery,
+  createPaginationMetadata,
+  createFilterHash,
+} from '../../utils/pagination.js';
 
 /**
  * Validates target registration request
@@ -82,13 +87,21 @@ export function createTargetsRouter(service: CoordinatorServiceLayer): Router {
    * - capability: Filter by capability
    * - boundary: Filter by allowed boundary
    * - classification: (Deprecated) Use boundary instead
+   * - cursor: Pagination cursor for offset-based pagination
+   * - limit: Page size (default: 50, max: 100)
    *
    * Deprecation: 'classification' parameter is deprecated. Use 'boundary' instead.
    * Both parameters are accepted for backward compatibility.
    */
   router.get('/', async (req, res, next) => {
     try {
-      const { type, status, capability, boundary, classification } = req.query;
+      const { type, status, capability, boundary, classification, cursor, limit } = req.query;
+
+      // Parse pagination parameters
+      const pagination = parsePaginationQuery({
+        cursor: cursor as string | undefined,
+        limit: limit as string | undefined,
+      });
 
       const filter: {
         agentType?: string;
@@ -122,11 +135,24 @@ export function createTargetsRouter(service: CoordinatorServiceLayer): Router {
         }
       }
 
-      const targets = await service.listTargets(filter);
+      // Create filter hash for cursor validation
+      const filterHash = createFilterHash(filter);
+
+      // Call service with pagination options
+      const result = await service.listTargets(filter, pagination);
+
+      // Create pagination metadata
+      const paginationMetadata: PaginationMetadata = createPaginationMetadata({
+        count: result.items.length,
+        total: result.total,
+        offset: pagination.offset,
+        limit: pagination.limit,
+        filterHash,
+      });
 
       res.json({
-        targets,
-        count: targets.length,
+        targets: result.items,
+        ...paginationMetadata,
       });
     } catch (err) {
       next(err);
@@ -353,6 +379,52 @@ export function createTargetsRouter(service: CoordinatorServiceLayer): Router {
         success: true,
         message: `Target ${id} enabled`,
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * POST /api/targets/disable-batch
+   * Batch disable targets
+   *
+   * Body: BatchDisableTargetsRequest
+   * - filter: Filter criteria for selecting targets (alternative to targetIds)
+   *   - agentType: Filter by agent type
+   *   - status: Filter by target status
+   *   - mechanism: Filter by mechanism type
+   * - targetIds: Specific target IDs to disable (alternative to filter)
+   * - preventSpinUp: Whether to prevent future spin-ups (default: true)
+   */
+  router.post('/disable-batch', async (req, res, next) => {
+    try {
+      const request = req.body as Partial<BatchDisableTargetsRequest>;
+
+      // Validate request - must have either filter or targetIds
+      if (!request.filter && !request.targetIds) {
+        throw new APIError(400, 'Either filter or targetIds must be provided');
+      }
+
+      if (request.targetIds && !Array.isArray(request.targetIds)) {
+        throw new APIError(400, 'targetIds must be an array');
+      }
+
+      if (request.filter) {
+        // Validate filter fields
+        if (request.filter.agentType && !['copilot-cli', 'claude-code'].includes(request.filter.agentType)) {
+          throw new APIError(400, 'filter.agentType must be copilot-cli or claude-code');
+        }
+        if (request.filter.status && typeof request.filter.status !== 'string') {
+          throw new APIError(400, 'filter.status must be a string');
+        }
+        if (request.filter.mechanism && typeof request.filter.mechanism !== 'string') {
+          throw new APIError(400, 'filter.mechanism must be a string');
+        }
+      }
+
+      const result = await service.batchDisableTargets(request);
+
+      res.json(result);
     } catch (err) {
       next(err);
     }

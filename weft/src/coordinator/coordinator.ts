@@ -107,10 +107,20 @@ export class ExtendedCoordinator extends EventEmitter {
     super();
     this.config = config;
     this.baseCoordinator = new BaseCoordinator({
+      projectId: config.projectId,
       staleThresholdMs: config.staleThresholdMs,
       cleanupIntervalMs: config.cleanupIntervalMs,
     });
     this.routingEngine = new RoutingEngine(config.routing);
+
+    // Forward all base coordinator events
+    this.baseCoordinator.on('work:submitted', (event) => this.emit('work:submitted', event));
+    this.baseCoordinator.on('work:assigned', (event) => this.emit('work:assigned', event));
+    this.baseCoordinator.on('work:started', (event) => this.emit('work:started', event));
+    this.baseCoordinator.on('work:progress', (event) => this.emit('work:progress', event));
+    this.baseCoordinator.on('work:completed', (event) => this.emit('work:completed', event));
+    this.baseCoordinator.on('work:failed', (event) => this.emit('work:failed', event));
+    this.baseCoordinator.on('work:cancelled', (event) => this.emit('work:cancelled', event));
   }
 
   /**
@@ -263,8 +273,7 @@ export class ExtendedCoordinator extends EventEmitter {
       workItem.requiredAgentType = request.requiredAgentType;
     }
 
-    // Emit work submitted event
-    this.emit('work-submitted', workItemId);
+    // Event emitted by base coordinator
 
     // Update spin-up event with work item ID if triggered
     if (spinUpTriggered) {
@@ -299,11 +308,8 @@ export class ExtendedCoordinator extends EventEmitter {
    * Record that a worker has claimed work
    */
   async recordClaim(workItemId: string, workerGuid: string): Promise<boolean> {
-    const result = await this.baseCoordinator.recordClaim(workItemId, workerGuid);
-    if (result) {
-      this.emit('work-assigned', workItemId, workerGuid);
-    }
-    return result;
+    // Event emitted by base coordinator
+    return await this.baseCoordinator.recordClaim(workItemId, workerGuid);
   }
 
   /**
@@ -314,11 +320,8 @@ export class ExtendedCoordinator extends EventEmitter {
     result?: Record<string, unknown>,
     summary?: string
   ): boolean {
-    const completed = this.baseCoordinator.recordCompletion(workItemId, result, summary);
-    if (completed) {
-      this.emit('work-completed', workItemId);
-    }
-    return completed;
+    // Event emitted by base coordinator
+    return this.baseCoordinator.recordCompletion(workItemId, result, summary);
   }
 
   /**
@@ -329,22 +332,16 @@ export class ExtendedCoordinator extends EventEmitter {
     error: string,
     recoverable: boolean
   ): Promise<boolean> {
-    const result = await this.baseCoordinator.recordError(workItemId, error, recoverable);
-    if (result) {
-      this.emit('work-failed', workItemId, error);
-    }
-    return result;
+    // Event emitted by base coordinator
+    return await this.baseCoordinator.recordError(workItemId, error, recoverable);
   }
 
   /**
    * Cancel work item
    */
   cancelWork(workItemId: string): boolean {
-    const result = this.baseCoordinator.cancelWork(workItemId);
-    if (result) {
-      this.emit('work-cancelled', workItemId);
-    }
-    return result;
+    // Event emitted by base coordinator
+    return this.baseCoordinator.cancelWork(workItemId);
   }
 
   /**

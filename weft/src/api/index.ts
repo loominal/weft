@@ -8,7 +8,11 @@
 
 // Server and service layer
 export { createExpressApp, startServer } from './server.js';
-export type { CoordinatorServiceLayer } from './server.js';
+export type { CoordinatorServiceLayer, ServerContext } from './server.js';
+
+// WebSocket server
+export { WeftWebSocketServer } from './websocket/index.js';
+export type { WebSocketMessage, WebSocketMessageType, WebSocketServerConfig } from './websocket/index.js';
 
 // Middleware
 export { createAuthMiddleware } from './middleware/auth.js';

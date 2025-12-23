@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { CoordinatorServiceLayer } from '../server.js';
+import { cacheMiddleware } from '../middleware/cache.js';
 
 /**
  * Extended service layer with multi-tenant methods
@@ -26,7 +27,7 @@ export function createStatsRouter(service: CoordinatorServiceLayer): Router {
    * - Aggregate totals
    * - Per-project breakdown
    */
-  router.get('/', async (_req, res, next) => {
+  router.get('/', cacheMiddleware(30), async (_req, res, next) => {
     try {
       // If multi-tenant mode, return global stats
       if (multiTenantService.getGlobalStats) {
@@ -52,7 +53,7 @@ export function createStatsRouter(service: CoordinatorServiceLayer): Router {
    * GET /api/stats/projects
    * List all active projects
    */
-  router.get('/projects', async (_req, res, next) => {
+  router.get('/projects', cacheMiddleware(30), async (_req, res, next) => {
     try {
       if (multiTenantService.listProjects) {
         const projects = multiTenantService.listProjects();

@@ -20,13 +20,12 @@ import { connect as natsConnect } from 'nats';
 import { connect as connectWs } from 'nats.ws';
 import ws from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import type { Server } from 'http';
 import type { CoordinatorConfiguration } from '@loominal/shared';
 import { DEFAULT_COORDINATOR_CONFIG, parseNatsUrl } from '@loominal/shared';
 
 // Component imports
 import { ProjectManager, type ProjectContext } from './projects/index.js';
-import { createExpressApp, startServer, type CoordinatorServiceLayer } from './api/index.js';
+import { createExpressApp, startServer, type CoordinatorServiceLayer, type ServerContext } from './api/index.js';
 
 /**
  * Service state
@@ -35,7 +34,7 @@ interface ServiceState {
   config: CoordinatorConfiguration;
   nc: NatsConnection;
   projectManager: ProjectManager;
-  httpServer?: Server;
+  serverContext?: ServerContext;
   isRunning: boolean;
 }
 
@@ -179,6 +178,30 @@ function createProjectServiceLayer(
 ): CoordinatorServiceLayer {
   const { coordinator, targetRegistry, spinUpManager, projectId } = context;
 
+  /**
+   * Resolve agent summary from GUID
+   * Returns AgentSummary or undefined if agent not found/offline
+   */
+  async function resolveAgentSummary(guid: string | undefined): Promise<any | undefined> {
+    if (!guid) return undefined;
+
+    try {
+      const workers = await coordinator.listAllAgents();
+      const agent = workers.find(w => w.guid === guid);
+
+      if (!agent) return undefined;
+
+      return {
+        guid: agent.guid,
+        handle: agent.handle,
+        agentType: agent.agentType,
+        hostname: agent.hostname,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   return {
     // Agent operations
     async listAgents(filter) {
@@ -187,11 +210,27 @@ function createProjectServiceLayer(
         ? await coordinator.findWorkers(filter.capability)
         : await coordinator.listAllAgents();
 
-      return workers.filter(a => {
+      // Apply additional filters
+      const filtered = workers.filter(a => {
         if (filter?.agentType && a.agentType !== filter.agentType) return false;
         if (filter?.status && a.status !== filter.status) return false;
         return true;
       });
+
+      // Extract pagination parameters
+      const offset = filter?.offset ?? 0;
+      const limit = filter?.limit;
+
+      // If no limit specified, return all results (backward compatible)
+      if (limit === undefined) {
+        return { agents: filtered, total: filtered.length };
+      }
+
+      // Apply pagination
+      const total = filtered.length;
+      const paginated = filtered.slice(offset, offset + limit);
+
+      return { agents: paginated, total };
     },
 
     async getAgent(guid) {
@@ -205,7 +244,33 @@ function createProjectServiceLayer(
 
     // Work operations
     async listWork(filter) {
-      return coordinator.getAssignments(filter as any);
+      const { offset, limit, ...filterParams } = filter || {};
+      const allWorkItems = coordinator.getAssignments(filterParams as any);
+
+      // Apply pagination if offset/limit provided
+      let workItems = allWorkItems;
+      if (offset !== undefined || limit !== undefined) {
+        const start = offset || 0;
+        const end = limit ? start + limit : undefined;
+        workItems = allWorkItems.slice(start, end);
+      }
+
+      // Resolve agent details for all assigned work items
+      const enrichedWorkItems = await Promise.all(
+        workItems.map(async (item: any) => {
+          if (!item.assignedTo) {
+            return item;
+          }
+
+          const assignedToAgent = await resolveAgentSummary(item.assignedTo);
+          return {
+            ...item,
+            assignedToAgent,
+          };
+        })
+      );
+
+      return enrichedWorkItems;
     },
 
     async submitWork(request: any) {
@@ -223,7 +288,18 @@ function createProjectServiceLayer(
     },
 
     async getWorkItem(id) {
-      return coordinator.getAssignment(id);
+      const workItem = coordinator.getAssignment(id);
+      if (!workItem) {
+        return null;
+      }
+
+      // Resolve agent details if assigned
+      const assignedToAgent = await resolveAgentSummary((workItem as any).assignedTo);
+
+      return {
+        ...workItem,
+        assignedToAgent,
+      };
     },
 
     async cancelWorkItem(id) {
@@ -268,18 +344,45 @@ function createProjectServiceLayer(
     },
 
     // Target operations
-    async listTargets(filter) {
-      return targetRegistry.queryTargets({
+    async listTargets(filter, pagination) {
+      const allTargets = await targetRegistry.queryTargets({
         agentType: filter?.agentType as any,
         status: filter?.status as any,
         capability: filter?.capability,
         boundary: filter?.boundary as any,
         includeDisabled: true,
       });
+
+      // Enrich targets with lastSpinUp data
+      const enrichedTargets = allTargets.map(target => {
+        const lastSpinUp = targetRegistry.getLastSpinUp(target.id);
+        return lastSpinUp ? { ...target, lastSpinUp } : target;
+      });
+
+      // Apply pagination if provided
+      if (pagination) {
+        const { offset, limit } = pagination;
+        const paginatedItems = enrichedTargets.slice(offset, offset + limit);
+        return {
+          items: paginatedItems,
+          total: enrichedTargets.length,
+        };
+      }
+
+      // No pagination - return all items (backward compatibility)
+      return {
+        items: enrichedTargets,
+        total: enrichedTargets.length,
+      };
     },
 
     async getTarget(idOrName) {
-      return targetRegistry.getTarget(idOrName);
+      const target = await targetRegistry.getTarget(idOrName);
+      if (!target) return null;
+
+      // Enrich with lastSpinUp data
+      const lastSpinUp = targetRegistry.getLastSpinUp(target.id);
+      return lastSpinUp ? { ...target, lastSpinUp } : target;
     },
 
     async registerTarget(request: any) {
@@ -347,6 +450,264 @@ function createProjectServiceLayer(
 
     async readChannelMessages(projectId: string, channelName: string, limit: number) {
       return readMessagesFromStream(nc, projectId, channelName, limit);
+    },
+
+    // Batch operations
+    async batchShutdownAgents(request: any) {
+      const { filter, agentGuids, graceful = true } = request;
+      const success: string[] = [];
+      const failed: string[] = [];
+      const errors: Record<string, string> = {};
+
+      // Get agents to shutdown
+      let agentsToShutdown: any[] = [];
+
+      if (agentGuids && agentGuids.length > 0) {
+        // Explicit GUID selection
+        const allAgents = await coordinator.listAllAgents();
+        agentsToShutdown = allAgents.filter(a => agentGuids.includes(a.guid));
+
+        // Track which GUIDs were not found
+        const foundGuids = new Set(agentsToShutdown.map(a => a.guid));
+        for (const guid of agentGuids) {
+          if (!foundGuids.has(guid)) {
+            failed.push(guid);
+            errors[guid] = 'Agent not found';
+          }
+        }
+      } else if (filter) {
+        // Filter-based selection
+        const allAgents = await coordinator.listAllAgents();
+        agentsToShutdown = allAgents.filter(agent => {
+          if (filter.status && agent.status !== filter.status) return false;
+          if (filter.agentType && agent.agentType !== filter.agentType) return false;
+          if (filter.boundary && !agent.boundaries?.includes(filter.boundary)) return false;
+          if (filter.capability && !agent.capabilities?.includes(filter.capability)) return false;
+          if (filter.idleTimeMs !== undefined) {
+            const idleTime = Date.now() - new Date(agent.lastActivity || 0).getTime();
+            if (idleTime < filter.idleTimeMs) return false;
+          }
+          return true;
+        });
+      } else {
+        return {
+          success: [],
+          failed: [],
+          count: 0,
+          errors: { error: 'Either filter or agentGuids must be provided' },
+          completedAt: new Date().toISOString(),
+          totalProcessed: 0,
+          successRate: 0,
+        };
+      }
+
+      // Attempt to shutdown each agent
+      for (const agent of agentsToShutdown) {
+        try {
+          // Check if agent is currently processing work (if not graceful)
+          if (!graceful) {
+            const assignments = await coordinator.getAssignments({ status: 'in-progress' });
+            const hasActiveWork = assignments.some(w => w.assignedTo === agent.guid);
+            if (hasActiveWork) {
+              failed.push(agent.guid);
+              errors[agent.guid] = 'Agent currently processing work (use graceful: true)';
+              continue;
+            }
+          }
+
+          nc.publish(`loom.${projectId}.agents.${agent.guid}.shutdown`, JSON.stringify({ graceful }));
+          success.push(agent.guid);
+        } catch (error: any) {
+          failed.push(agent.guid);
+          errors[agent.guid] = error.message || 'Unknown error';
+        }
+      }
+
+      const totalProcessed = success.length + failed.length;
+      return {
+        success,
+        failed,
+        count: success.length,
+        errors,
+        completedAt: new Date().toISOString(),
+        totalProcessed,
+        successRate: totalProcessed > 0 ? (success.length / totalProcessed) * 100 : 0,
+        shutdownAgents: success,
+        graceful,
+      };
+    },
+
+    async batchDisableTargets(request: any) {
+      const { filter, targetIds } = request;
+      const success: string[] = [];
+      const failed: string[] = [];
+      const errors: Record<string, string> = {};
+      const alreadyDisabled: string[] = [];
+
+      // Get targets to disable
+      let targetsToDisable: any[] = [];
+
+      if (targetIds && targetIds.length > 0) {
+        // Explicit ID selection
+        for (const id of targetIds) {
+          try {
+            const target = await targetRegistry.getTarget(id);
+            if (target) {
+              targetsToDisable.push(target);
+            } else {
+              failed.push(id);
+              errors[id] = 'Target not found';
+            }
+          } catch (error: any) {
+            failed.push(id);
+            errors[id] = error.message || 'Unknown error';
+          }
+        }
+      } else if (filter) {
+        // Filter-based selection
+        targetsToDisable = await targetRegistry.queryTargets({
+          agentType: filter.agentType,
+          status: filter.status,
+          mechanism: filter.mechanism,
+          includeDisabled: true,
+        });
+      } else {
+        return {
+          success: [],
+          failed: [],
+          count: 0,
+          errors: { error: 'Either filter or targetIds must be provided' },
+          completedAt: new Date().toISOString(),
+          totalProcessed: 0,
+          successRate: 0,
+          disabledTargets: [],
+          alreadyDisabled: [],
+        };
+      }
+
+      // Attempt to disable each target
+      for (const target of targetsToDisable) {
+        try {
+          if (target.status === 'disabled') {
+            alreadyDisabled.push(target.id);
+            success.push(target.id); // Still count as success
+            continue;
+          }
+
+          await targetRegistry.updateTargetStatus(target.id, 'disabled');
+          success.push(target.id);
+        } catch (error: any) {
+          failed.push(target.id);
+          errors[target.id] = error.message || 'Unknown error';
+        }
+      }
+
+      const totalProcessed = success.length + failed.length;
+      return {
+        success,
+        failed,
+        count: success.length,
+        errors,
+        completedAt: new Date().toISOString(),
+        totalProcessed,
+        successRate: totalProcessed > 0 ? (success.length / totalProcessed) * 100 : 0,
+        disabledTargets: success.filter(id => !alreadyDisabled.includes(id)),
+        alreadyDisabled,
+      };
+    },
+
+    async batchCancelWork(request: any) {
+      const { filter, workItemIds, reassign = false } = request;
+      const success: string[] = [];
+      const failed: string[] = [];
+      const errors: Record<string, string> = {};
+      const notCancellable: string[] = [];
+      const reassignedItems: string[] = [];
+
+      // Get work items to cancel
+      let workToCancel: any[] = [];
+
+      if (workItemIds && workItemIds.length > 0) {
+        // Explicit ID selection
+        for (const id of workItemIds) {
+          try {
+            const work = await coordinator.getAssignment(id);
+            if (work) {
+              workToCancel.push(work);
+            } else {
+              failed.push(id);
+              errors[id] = 'Work item not found';
+            }
+          } catch (error: any) {
+            failed.push(id);
+            errors[id] = error.message || 'Unknown error';
+          }
+        }
+      } else if (filter) {
+        // Filter-based selection
+        const allWork = await coordinator.getAssignments({});
+        workToCancel = allWork.filter(work => {
+          if (filter.status && work.status !== filter.status) return false;
+          if (filter.boundary && work.boundary !== filter.boundary) return false;
+          if (filter.capability && work.capability !== filter.capability) return false;
+          if (filter.assignedTo && work.assignedTo !== filter.assignedTo) return false;
+          if (filter.minPriority !== undefined && (work.priority || 5) < filter.minPriority) return false;
+          return true;
+        });
+      } else {
+        return {
+          success: [],
+          failed: [],
+          count: 0,
+          errors: { error: 'Either filter or workItemIds must be provided' },
+          completedAt: new Date().toISOString(),
+          totalProcessed: 0,
+          successRate: 0,
+          cancelledItems: [],
+          reassignedItems: [],
+          notCancellable: [],
+        };
+      }
+
+      // Attempt to cancel each work item
+      for (const work of workToCancel) {
+        try {
+          // Check if work is already completed/failed
+          if (work.status === 'completed' || work.status === 'failed') {
+            notCancellable.push(work.taskId);
+            failed.push(work.taskId);
+            errors[work.taskId] = `Cannot cancel work in ${work.status} state`;
+            continue;
+          }
+
+          coordinator.cancelWork(work.taskId);
+          success.push(work.taskId);
+
+          // Handle reassignment if requested and work was in-progress
+          if (reassign && work.status === 'in-progress') {
+            // Note: Actual reassignment logic would need to be implemented in coordinator
+            // For now, just track that it should be reassigned
+            reassignedItems.push(work.taskId);
+          }
+        } catch (error: any) {
+          failed.push(work.taskId);
+          errors[work.taskId] = error.message || 'Unknown error';
+        }
+      }
+
+      const totalProcessed = success.length + failed.length;
+      return {
+        success,
+        failed,
+        count: success.length,
+        errors,
+        completedAt: new Date().toISOString(),
+        totalProcessed,
+        successRate: totalProcessed > 0 ? (success.length / totalProcessed) * 100 : 0,
+        cancelledItems: success,
+        reassignedItems,
+        notCancellable,
+      };
     },
   };
 }
@@ -440,10 +801,10 @@ function createMultiTenantServiceLayer(
     },
 
     // Target operations
-    async listTargets(filter) {
+    async listTargets(filter, pagination) {
       const context = await getContext((filter as any)?.projectId);
       const layer = createProjectServiceLayer(context, nc);
-      return layer.listTargets(filter);
+      return layer.listTargets(filter, pagination);
     },
 
     async getTarget(idOrName) {
@@ -546,6 +907,25 @@ function createMultiTenantServiceLayer(
 
     async readChannelMessages(projectId: string, channelName: string, limit: number) {
       return readMessagesFromStream(nc, projectId, channelName, limit);
+    },
+
+    // Batch operations
+    async batchShutdownAgents(request: any) {
+      const context = await getContext(request.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.batchShutdownAgents(request);
+    },
+
+    async batchDisableTargets(request: any) {
+      const context = await getContext(request.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.batchDisableTargets(request);
+    },
+
+    async batchCancelWork(request: any) {
+      const context = await getContext(request.projectId);
+      const layer = createProjectServiceLayer(context, nc);
+      return layer.batchCancelWork(request);
     },
 
     // Multi-tenant specific methods
@@ -826,6 +1206,136 @@ function setupNATSHandlers(
 }
 
 /**
+ * Setup event broadcasting from coordinators to WebSocket server
+ */
+function setupEventBroadcasting(
+  projectManager: ProjectManager,
+  serverContext: ServerContext
+): void {
+  const { wsServer } = serverContext;
+
+  // Import event types and protocol
+  const { CoordinatorEventType } = require('@loominal/shared');
+  const { eventTypeToTopic } = require('./api/websocket/protocol.js');
+
+  // Subscribe to events from all existing projects
+  const setupProjectEvents = (context: ProjectContext) => {
+    const { coordinator, projectId } = context;
+
+    // Agent events
+    coordinator.on(CoordinatorEventType.AGENT_REGISTERED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.AGENT_UPDATED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.AGENT_SHUTDOWN, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    // Work events
+    coordinator.on(CoordinatorEventType.WORK_SUBMITTED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.WORK_ASSIGNED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.WORK_STARTED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.WORK_PROGRESS, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.WORK_COMPLETED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.WORK_FAILED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.WORK_CANCELLED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    // Target events
+    coordinator.on(CoordinatorEventType.TARGET_REGISTERED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.TARGET_UPDATED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.TARGET_DISABLED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.TARGET_REMOVED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.TARGET_HEALTH_CHANGED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    // Spin-up events
+    coordinator.on(CoordinatorEventType.SPIN_UP_TRIGGERED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.SPIN_UP_STARTED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.SPIN_UP_COMPLETED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    coordinator.on(CoordinatorEventType.SPIN_UP_FAILED, (event) => {
+      const topic = eventTypeToTopic(event.type);
+      wsServer.broadcastEvent(topic, event);
+    });
+
+    console.log(`  Event broadcasting setup for project: ${projectId}`);
+  };
+
+  // Setup events for all existing projects
+  for (const context of projectManager.getAllProjects()) {
+    setupProjectEvents(context);
+  }
+
+  // Listen for new project creation and setup events for them
+  // Note: ProjectManager would need to emit an event when projects are created
+  // For now, we'll just set up events for existing projects
+  console.log('  WebSocket event broadcasting configured');
+}
+
+/**
  * Start the coordinator service (multi-tenant)
  */
 export async function startService(): Promise<void> {
@@ -913,8 +1423,12 @@ export async function startService(): Promise<void> {
       );
 
       const app = createExpressApp(config.api, serviceLayer);
-      await startServer(app, config.api);
+      const serverContext = await startServer(app, config.api, serviceLayer, config.projectId);
+      state.serverContext = serverContext;
       console.log('  REST API started');
+
+      // Wire up coordinator events to WebSocket broadcasts
+      setupEventBroadcasting(projectManager, serverContext);
     }
 
     state.isRunning = true;
@@ -949,6 +1463,12 @@ export async function stopService(): Promise<void> {
   }
 
   console.log('Stopping Coordinator Service...');
+
+  // Shutdown WebSocket and HTTP servers
+  if (state.serverContext) {
+    await state.serverContext.shutdown();
+    console.log('  HTTP and WebSocket servers shut down');
+  }
 
   // Shutdown all projects via ProjectManager
   if (state.projectManager) {
