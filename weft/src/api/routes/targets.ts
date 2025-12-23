@@ -80,11 +80,15 @@ export function createTargetsRouter(service: CoordinatorServiceLayer): Router {
    * - type: Filter by agent type
    * - status: Filter by status (available, in-use, disabled, error)
    * - capability: Filter by capability
-   * - boundary: Filter by allowed classification
+   * - boundary: Filter by allowed boundary
+   * - classification: (Deprecated) Use boundary instead
+   *
+   * Deprecation: 'classification' parameter is deprecated. Use 'boundary' instead.
+   * Both parameters are accepted for backward compatibility.
    */
   router.get('/', async (req, res, next) => {
     try {
-      const { type, status, capability, classification } = req.query;
+      const { type, status, capability, boundary, classification } = req.query;
 
       const filter: {
         agentType?: string;
@@ -102,8 +106,20 @@ export function createTargetsRouter(service: CoordinatorServiceLayer): Router {
       if (capability && typeof capability === 'string') {
         filter.capability = capability;
       }
-      if (classification && typeof classification === 'string') {
-        filter.boundary = classification;
+
+      // Support both 'boundary' and 'classification' parameters
+      // Prefer 'boundary', fall back to 'classification'
+      const boundaryValue = (boundary || classification) as string | undefined;
+      if (boundaryValue && typeof boundaryValue === 'string') {
+        filter.boundary = boundaryValue;
+
+        // Add deprecation header if old param was used
+        if (classification && !boundary) {
+          res.setHeader(
+            'X-Deprecated-Param',
+            'classification (use boundary instead)',
+          );
+        }
       }
 
       const targets = await service.listTargets(filter);

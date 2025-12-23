@@ -35,11 +35,15 @@ export function createWorkRouter(service: CoordinatorServiceLayer): Router {
    *
    * Query parameters:
    * - status: Filter by status (pending, assigned, in-progress, completed, failed, cancelled)
-   * - boundary: Filter by classification
+   * - boundary: Filter by boundary/classification
+   * - classification: (Deprecated) Use boundary instead
+   *
+   * Deprecation: 'classification' parameter is deprecated. Use 'boundary' instead.
+   * Both parameters are accepted for backward compatibility.
    */
   router.get('/', async (req, res, next) => {
     try {
-      const { status, classification } = req.query;
+      const { status, boundary, classification } = req.query;
 
       const filter: {
         status?: string;
@@ -49,8 +53,20 @@ export function createWorkRouter(service: CoordinatorServiceLayer): Router {
       if (status && typeof status === 'string') {
         filter.status = status;
       }
-      if (classification && typeof classification === 'string') {
-        filter.boundary = classification;
+
+      // Support both 'boundary' and 'classification' parameters
+      // Prefer 'boundary', fall back to 'classification'
+      const boundaryValue = (boundary || classification) as string | undefined;
+      if (boundaryValue && typeof boundaryValue === 'string') {
+        filter.boundary = boundaryValue;
+
+        // Add deprecation header if old param was used
+        if (classification && !boundary) {
+          res.setHeader(
+            'X-Deprecated-Param',
+            'classification (use boundary instead)',
+          );
+        }
       }
 
       const workItems = await service.listWork(filter);
